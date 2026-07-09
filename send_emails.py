@@ -294,7 +294,7 @@ CONTACT_QUERY = """
         ct.email IS NOT NULL
         AND ct.is_invalid = 0
         AND ct.email != ''
-    ORDER BY ct.id ASC
+    ORDER BY ct.id DESC
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ def render(template: str, contact: dict) -> str:
 
 import re
 
-def text_to_html(text: str) -> str:
+def text_to_html(text: str, pixel_tag: str = "") -> str:
     """Convert plain text email body to clean HTML with clickable links."""
     import html as html_lib
 
@@ -452,7 +452,7 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     # Inner multipart/alternative for plain + HTML
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(final_body, "plain", "utf-8"))
-    alt.attach(MIMEText(text_to_html(final_body), "html", "utf-8"))
+    alt.attach(MIMEText(text_to_html(final_body, pixel_tag), "html", "utf-8"))
     msg.attach(alt)
 
     # Attach resume if it exists
