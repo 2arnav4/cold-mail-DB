@@ -313,11 +313,20 @@ CONTACT_QUERY = """
 
 
 def load_log(log_path: str) -> dict:
-    """Load the sent log. Structure: { 'sent': [...emails...], 'daily': {'YYYY-MM-DD': count} }"""
+    """Load the sent log.
+    Structure: {
+      'sent': [...emails...],
+      'daily': {'YYYY-MM-DD': count},
+      'details': {'email': {'company': ..., 'sent_at': ...}}
+    }"""
     if os.path.exists(log_path):
         with open(log_path, "r") as f:
-            return json.load(f)
-    return {"sent": [], "daily": {}}
+            data = json.load(f)
+            # Ensure 'details' key exists for older logs
+            if "details" not in data:
+                data["details"] = {}
+            return data
+    return {"sent": [], "daily": {}, "details": {}}
 
 
 def save_log(log_path: str, log: dict):
@@ -359,10 +368,60 @@ def sent_today(log: dict) -> int:
     return log["daily"].get(today, 0)
 
 
-def record_sent(log: dict, email: str):
+def record_sent(log: dict, email: str, company: str = ""):
+    """Record a successful send — email list, daily count, and per-email details."""
+    from datetime import datetime
     today = str(date.today())
     log["sent"].append(email)
     log["daily"][today] = log["daily"].get(today, 0) + 1
+    log["details"][email] = {
+        "company": company,
+        "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
+def sync_tracker_from_logs(cfg: dict):
+    """Re-sync all local sent/bounce logs to the Render tracker.
+    Call this at startup so the dashboard always reflects local truth,
+    even after Render restarts and wipes its ephemeral /tmp database."""
+    tracker_url = cfg.get("tracker_url", "").rstrip("/")
+    if not tracker_url:
+        return
+
+    log    = load_log(cfg["log_path"])
+    failed = load_failed_log(cfg["log_path"])
+
+    # Build sends payload from the details dict (has company + sent_at)
+    sends = [
+        {"email": email, "company": info.get("company", ""), "sent_at": info.get("sent_at", "")}
+        for email, info in log.get("details", {}).items()
+    ]
+    # Fall back: emails in sent[] with no details entry get a bare record
+    details_emails = set(log.get("details", {}).keys())
+    for email in log.get("sent", []):
+        if email not in details_emails:
+            sends.append({"email": email, "company": "", "sent_at": ""})
+
+    bounces = [
+        {"email": b["email"], "company": b.get("company", ""),
+         "reason": b.get("error", "Bounce — invalid address"), "sent_at": b.get("time", "")}
+        for b in failed
+    ]
+
+    try:
+        import urllib.request, json as _json
+        payload = _json.dumps({"sends": sends, "bounces": bounces}).encode()
+        req = urllib.request.Request(
+            f"{tracker_url}/api/bulk_sync",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = _json.loads(resp.read())
+        print(f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces")
+    except Exception as e:
+        print(f"  Tracker sync warning: {e}")
 
 
 def load_template(template_path: str) -> tuple:
@@ -681,6 +740,8 @@ def main():
     # Automatically check for bounces on startup (if not a dry run)
     if not dry_run:
         check_and_sync_bounces(cfg)
+        # Re-sync all local data to Render so dashboard survives server restarts
+        sync_tracker_from_logs(cfg)
 
     # Load state
     log = load_log(cfg["log_path"])
@@ -772,7 +833,7 @@ def main():
             try:
                 msg = build_email(cfg, contact, subject_template, body_template)
                 smtp_conn.send_message(msg)
-                record_sent(log, email_addr)
+                record_sent(log, email_addr, company)
                 sent_this_run.append(contact)
                 save_log(cfg["log_path"], log)   # Save after each send (safe against crashes)
                 

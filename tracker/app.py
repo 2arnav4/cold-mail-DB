@@ -112,6 +112,34 @@ def log_bounce():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Bulk sync endpoint (re-populates after Render restart) ───────────────────
+@app.route("/api/bulk_sync", methods=["POST"])
+def bulk_sync():
+    data    = request.get_json() or {}
+    sends   = data.get("sends",   [])   # [{email, company, sent_at}]
+    bounces = data.get("bounces", [])   # [{email, company, reason, sent_at}]
+
+    try:
+        with get_db() as conn:
+            for s in sends:
+                conn.execute(
+                    "INSERT OR IGNORE INTO sends (email, company, sent_at, status, bounce_reason) "
+                    "VALUES (?, ?, ?, 'sent', '')",
+                    (s.get("email", ""), s.get("company", ""), s.get("sent_at", ""))
+                )
+            for b in bounces:
+                conn.execute(
+                    "INSERT INTO sends (email, company, sent_at, status, bounce_reason) "
+                    "VALUES (?, ?, ?, 'bounced', ?) "
+                    "ON CONFLICT(email) DO UPDATE SET status='bounced', bounce_reason=excluded.bounce_reason",
+                    (b.get("email", ""), b.get("company", ""), b.get("sent_at", ""), b.get("reason", "Bounce — invalid address"))
+                )
+            conn.commit()
+        return jsonify({"synced_sends": len(sends), "synced_bounces": len(bounces)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Tracking pixel endpoint ───────────────────────────────────────────────────
 @app.route("/t/<path:encoded>.gif")
 def track(encoded):
