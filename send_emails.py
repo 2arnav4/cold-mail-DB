@@ -381,15 +381,51 @@ def record_sent(log: dict, email: str, company: str = ""):
 
 
 def sync_tracker_from_logs(cfg: dict):
-    """Re-sync all local sent/bounce logs to the Render tracker.
-    Call this at startup so the dashboard always reflects local truth,
-    even after Render restarts and wipes its ephemeral /tmp database."""
+    """Re-sync all local sent/bounce/open logs to the Render tracker.
+    Also downloads new opens from the tracker to back them up locally,
+    making the dashboard fully persistent across Render restarts."""
     tracker_url = cfg.get("tracker_url", "").rstrip("/")
     if not tracker_url:
         return
 
+    import urllib.request, json as _json
+
     log    = load_log(cfg["log_path"])
     failed = load_failed_log(cfg["log_path"])
+
+    # Load local opens backup
+    opens_path = cfg["log_path"].replace(".json", "_opens.json")
+    local_opens = []
+    if os.path.exists(opens_path):
+        try:
+            with open(opens_path, "r") as f:
+                local_opens = _json.load(f)
+        except Exception:
+            pass
+
+    # 1. Download current opens from Render to back them up locally
+    try:
+        req = urllib.request.Request(f"{tracker_url}/api/stats", method="GET")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            server_opens = _json.loads(resp.read())
+        
+        # Merge server opens into local backup (deduplicate by (email, opened_at))
+        local_keys = {(o["email"], o["opened_at"]) for o in local_opens}
+        added_new = False
+        for o in server_opens:
+            key = (o["email"], o["opened_at"])
+            if key not in local_keys:
+                local_opens.append(o)
+                local_keys.add(key)
+                added_new = True
+        
+        if added_new:
+            # Sort by opened_at descending
+            local_opens.sort(key=lambda x: x.get("opened_at", ""), reverse=True)
+            with open(opens_path, "w") as f:
+                _json.dump(local_opens, f, indent=2)
+    except Exception as err:
+        print(f"  Warning: Could not fetch opens backup from server: {err}")
 
     # Build sends payload from the details dict (has company + sent_at)
     sends = [
@@ -409,8 +445,7 @@ def sync_tracker_from_logs(cfg: dict):
     ]
 
     try:
-        import urllib.request, json as _json
-        payload = _json.dumps({"sends": sends, "bounces": bounces}).encode()
+        payload = _json.dumps({"sends": sends, "bounces": bounces, "opens": local_opens}).encode()
         req = urllib.request.Request(
             f"{tracker_url}/api/bulk_sync",
             data=payload,
@@ -419,7 +454,7 @@ def sync_tracker_from_logs(cfg: dict):
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = _json.loads(resp.read())
-        print(f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces")
+        print(f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces, {result.get('synced_opens', 0)} opens")
     except Exception as e:
         print(f"  Tracker sync warning: {e}")
 

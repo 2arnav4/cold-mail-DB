@@ -31,7 +31,8 @@ def init_db():
                 company     TEXT    DEFAULT '',
                 opened_at   TEXT    NOT NULL,
                 ip          TEXT    DEFAULT '',
-                user_agent  TEXT    DEFAULT ''
+                user_agent  TEXT    DEFAULT '',
+                UNIQUE(email, opened_at)
             )
         """)
         conn.execute("""
@@ -118,6 +119,7 @@ def bulk_sync():
     data    = request.get_json() or {}
     sends   = data.get("sends",   [])
     bounces = data.get("bounces", [])
+    opens   = data.get("opens",   [])
     try:
         with get_db() as conn:
             for s in sends:
@@ -137,8 +139,14 @@ def bulk_sync():
                      b.get("bounce_type","hard"),
                      b.get("retry_after",""))
                 )
+            for o in opens:
+                conn.execute(
+                    "INSERT OR IGNORE INTO opens (email, company, opened_at, ip, user_agent) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (o.get("email",""), o.get("company",""), o.get("opened_at",""), o.get("ip",""), o.get("user_agent",""))
+                )
             conn.commit()
-        return jsonify({"synced_sends": len(sends), "synced_bounces": len(bounces)}), 200
+        return jsonify({"synced_sends": len(sends), "synced_bounces": len(bounces), "synced_opens": len(opens)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -342,7 +350,7 @@ def stats():
 @app.route("/api/stats")
 def api_stats():
     with get_db() as conn:
-        rows = conn.execute("SELECT email,company,opened_at,ip FROM opens ORDER BY opened_at DESC").fetchall()
+        rows = conn.execute("SELECT email, company, opened_at, ip, user_agent FROM opens ORDER BY opened_at DESC").fetchall()
     return jsonify([dict(r) for r in rows])
 
 
