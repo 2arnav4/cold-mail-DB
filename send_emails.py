@@ -644,6 +644,8 @@ def main():
     parser.add_argument("--check-bounces", action="store_true",
                         help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit")
     args = parser.parse_args()
+    dry_run = args.dry_run
+    cfg = CONFIG.copy()
 
     # Handle manual bounce check flag
     if args.check_bounces:
