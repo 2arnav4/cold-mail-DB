@@ -1,0 +1,24 @@
+Subject: Internship Opportunity – {{company}}
+
+Hi {{first_name}},
+
+I came across {{company}} and would love to explore an internship opportunity with your team.
+
+I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
+
+A few things I've built:
+• Pulse – a React + Node/Express/PostgreSQL collaboration platform handling 3K+ tasks across teams, with Groq AI-powered standup generation and JWT auth
+• Lucent FinTech – a 10-screen React/TypeScript finance dashboard tracking 200+ stocks and crypto assets in real time via Finnhub, MarketStack, and CoinMarketCap
+• Student Helper – a MERN platform serving 150+ students with Google OAuth, a writer marketplace, and push notifications
+
+I care about shipping interfaces that are fast, intuitive, and production-ready.
+
+Resources:
+• Portfolio: https://arnav24.tech
+• GitHub: https://github.com/2arnav4
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
+
+My resume is attached. Happy to connect if there's a fit.
+
+Best,
+Arnav Singla
