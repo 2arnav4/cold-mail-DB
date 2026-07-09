@@ -574,9 +574,8 @@ def print_summary(sent: list, skipped: int, remaining_today: int, dry_run: bool)
 
 
 def check_and_sync_bounces(cfg: dict) -> list:
-    """Connects to Gmail via IMAP, finds delivery status failure emails,
-    extracts the bounced email addresses, registers them locally and on the Render tracker API,
-    and removes them from the local SQLite database."""
+    """Connects to Gmail via IMAP, detects bounces, classifies them as hard (5xx) or
+    soft (4xx / temporary), records retry info, and syncs to the Render tracker."""
     import imaplib
     import email as _email
     import re
@@ -585,54 +584,107 @@ def check_and_sync_bounces(cfg: dict) -> list:
     from datetime import datetime
 
     print("Checking Gmail for new bounces via IMAP...")
-    email_addr = cfg["your_email"]
-    app_pwd = cfg["app_password"].replace(" ", "")
+    email_addr  = cfg["your_email"]
+    app_pwd     = cfg["app_password"].replace(" ", "")
     tracker_url = cfg.get("tracker_url", "").rstrip("/")
 
-    bounced_emails = []
+    # Patterns that indicate a HARD bounce (address doesn't exist — no retry)
+    HARD_PATTERNS = [
+        r"user unknown", r"no such user", r"address rejected",
+        r"does not exist", r"invalid address", r"mailbox not found",
+        r"user not found", r"account has been disabled", r"no mailbox here",
+        r"550", r"551", r"552", r"553", r"554",
+    ]
+    # Patterns that indicate a SOFT bounce (temporary — Gmail will retry)
+    SOFT_PATTERNS = [
+        r"mailbox full", r"over quota", r"temporarily unavailable",
+        r"service unavailable", r"try again later", r"connection timeout",
+        r"452", r"421", r"450", r"451",
+    ]
+    # Retry delay keywords
+    RETRY_PATTERNS = [
+        (r"retry.*?(\d+)\s*hour",  "{n}h"),
+        (r"(\d+)\s*hour.*?retry",  "{n}h"),
+        (r"retry.*?(\d+)\s*day",   "{n} day"),
+        (r"will retry for (\d+)",  "~{n}h"),
+        (r"try again in (\d+)",    "{n}h"),
+    ]
+
+    bounced_records = []   # list of {email, reason, bounce_type, retry_after}
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(email_addr, app_pwd)
         mail.select("INBOX")
 
-        # Search for failure notifications from Mailer-Daemon
-        status, messages = mail.search(None, '(FROM "mailer-daemon@googlemail.com" SUBJECT "Delivery Status Notification (Failure)")')
-        if status != "OK":
+        status, messages = mail.search(
+            None,
+            '(FROM "mailer-daemon@googlemail.com" SUBJECT "Delivery Status Notification")'
+        )
+        if status != "OK" or not messages[0].split():
             print("  No bounce notification messages found.")
+            mail.logout()
             return []
 
         message_ids = messages[0].split()
-        if not message_ids:
-            print("  No new bounces found in Inbox.")
-            return []
-
         print(f"  Scanning {len(message_ids)} bounce notification emails...")
 
-        # Parse emails (limit to last 50 to prevent taking too long)
         for msg_id in message_ids[-50:]:
             res, msg_data = mail.fetch(msg_id, "(RFC822)")
             for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    original_msg = _email.message_from_bytes(response_part[1])
-                    body = ""
-                    if original_msg.is_multipart():
-                        for part in original_msg.walk():
-                            content_type = part.get_content_type()
-                            if content_type == "text/plain":
-                                body += part.get_payload(decode=True).decode(errors="ignore")
-                    else:
-                        body = original_msg.get_payload(decode=True).decode(errors="ignore")
+                if not isinstance(response_part, tuple):
+                    continue
+                original_msg = _email.message_from_bytes(response_part[1])
+                body = ""
+                if original_msg.is_multipart():
+                    for part in original_msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body += part.get_payload(decode=True).decode(errors="ignore")
+                else:
+                    body = original_msg.get_payload(decode=True).decode(errors="ignore")
 
-                    matches = re.findall(
-                        r"(?:Failed recipient|To|Delivered-To|Final-Recipient; rfc822|Your message wasn't delivered to)\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?",
-                        body,
-                        re.IGNORECASE
-                    )
-                    for m in matches:
-                        # Exclude self emails or generic postmaster targets
-                        if m.lower() != email_addr.lower() and m not in bounced_emails:
-                            bounced_emails.append(m)
+                body_lower = body.lower()
+
+                # Extract bounced address
+                matches = re.findall(
+                    r"(?:Failed recipient|To|Final-Recipient.*?rfc822|Your message wasn't delivered to)\s*[:\;]?\s*\<?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\>?",
+                    body, re.IGNORECASE
+                )
+
+                for m in matches:
+                    if m.lower() == email_addr.lower():
+                        continue
+                    if any(r["email"] == m for r in bounced_records):
+                        continue
+
+                    # Classify bounce type
+                    is_hard = any(re.search(p, body_lower) for p in HARD_PATTERNS)
+                    is_soft = any(re.search(p, body_lower) for p in SOFT_PATTERNS)
+                    bounce_type = "soft" if (is_soft and not is_hard) else "hard"
+
+                    # Build reason string
+                    if bounce_type == "hard":
+                        reason = "Hard bounce — address not found / rejected (5xx)"
+                    else:
+                        reason = "Soft bounce — temporary delivery failure (4xx)"
+
+                    # Try to extract retry delay
+                    retry_after = ""
+                    for pattern, fmt in RETRY_PATTERNS:
+                        m2 = re.search(pattern, body_lower)
+                        if m2:
+                            retry_after = fmt.replace("{n}", m2.group(1))
+                            break
+                    # Gmail default retry schedule hint
+                    if bounce_type == "soft" and not retry_after:
+                        retry_after = "24h / 48h / 72h (Gmail auto-retry)"
+
+                    bounced_records.append({
+                        "email":       m,
+                        "reason":      reason,
+                        "bounce_type": bounce_type,
+                        "retry_after": retry_after,
+                    })
 
         mail.close()
         mail.logout()
@@ -640,73 +692,81 @@ def check_and_sync_bounces(cfg: dict) -> list:
         print(f"  Warning: IMAP bounce check failed: {e}")
         return []
 
-    if not bounced_emails:
+    if not bounced_records:
         print("  No bounced addresses detected.")
         return []
 
-    print(f"  Detected {len(bounced_emails)} bounced email addresses: {bounced_emails}")
+    bounced_emails = [r["email"] for r in bounced_records]
+    hard = sum(1 for r in bounced_records if r["bounce_type"] == "hard")
+    soft = sum(1 for r in bounced_records if r["bounce_type"] == "soft")
+    print(f"  Detected {len(bounced_records)} bounces — {hard} hard, {soft} soft: {bounced_emails}")
 
-    # Load logs to record the bounces
-    log = load_log(cfg["log_path"])
+    log    = load_log(cfg["log_path"])
     failed = load_failed_log(cfg["log_path"])
     existing_failed = {item["email"] for item in failed}
-    
+
     new_bounces_logged = 0
 
-    for email in bounced_emails:
-        # Add to local sent_log.json to block future attempts
+    for rec in bounced_records:
+        email = rec["email"]
         if email not in log["sent"]:
             log["sent"].append(email)
-            # Subtract from today's daily count if it was sent today
             today = date.today().strftime("%Y-%m-%d")
             if today in log["daily"]:
                 log["daily"][today] = max(0, log["daily"][today] - 1)
 
-        # Add to failed log
         if email not in existing_failed:
             failed.append({
-                "email": email,
-                "name": "",
-                "company": "",
-                "error": "Bounce — invalid address (auto-detected)",
-                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "email":       email,
+                "name":        "",
+                "company":     log.get("details", {}).get(email, {}).get("company", ""),
+                "error":       rec["reason"],
+                "bounce_type": rec["bounce_type"],
+                "retry_after": rec["retry_after"],
+                "time":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             })
             new_bounces_logged += 1
 
-            # Report bounce to Render Tracker API
             if tracker_url:
                 try:
+                    payload = _json.dumps({
+                        "email":       email,
+                        "reason":      rec["reason"],
+                        "bounce_type": rec["bounce_type"],
+                        "retry_after": rec["retry_after"],
+                    }).encode("utf-8")
                     req = _urllib.Request(
-                        f"{tracker_url}/api/log_bounce",
-                        data=_json.dumps({"email": email, "reason": "Bounce — invalid address (auto-detected)"}).encode("utf-8"),
-                        headers={"Content-Type": "application/json"},
-                        method="POST"
+                        f"{tracker_url}/api/log_bounce", data=payload,
+                        headers={"Content-Type": "application/json"}, method="POST"
                     )
-                    with _urllib.urlopen(req, timeout=5):
+                    with _urllib.urlopen(req, timeout=8):
                         pass
                 except Exception as te:
-                    print(f"    Tracker API log_bounce failed for {email}: {te}")
+                    print(f"    Tracker log_bounce failed for {email}: {te}")
 
-    # Save files if updates happened
     save_log(cfg["log_path"], log)
     failed_path = cfg["log_path"].replace(".json", "_failed.json")
     with open(failed_path, "w") as f:
         _json.dump(failed, f, indent=2)
 
-    # Clean local SQLite database contacts
+    # Clean local SQLite database
     try:
-        conn = sqlite3.connect(cfg["db_path"])
-        cur = conn.cursor()
-        cur.executemany("DELETE FROM contacts WHERE email = ?", [(e,) for e in bounced_emails])
-        conn.commit()
-        deleted_count = conn.total_changes
-        conn.close()
-        print(f"  Removed {deleted_count} bounced contacts from local database.")
+        # Only remove hard bounces from DB — soft bounces may still be valid
+        hard_emails = [r["email"] for r in bounced_records if r["bounce_type"] == "hard"]
+        if hard_emails:
+            conn = sqlite3.connect(cfg["db_path"])
+            cur  = conn.cursor()
+            cur.executemany("DELETE FROM contacts WHERE email = ?", [(e,) for e in hard_emails])
+            conn.commit()
+            deleted_count = conn.total_changes
+            conn.close()
+            print(f"  Removed {deleted_count} hard-bounced contacts from local database.")
     except Exception as dbe:
-        print(f"  Warning: Database deletion of bounced emails failed: {dbe}")
+        print(f"  Warning: Database cleanup failed: {dbe}")
 
     print(f"  Successfully synced {new_bounces_logged} new bounces.")
     return bounced_emails
+
 
 
 def main():
