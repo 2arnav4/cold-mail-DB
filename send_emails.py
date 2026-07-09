@@ -610,6 +610,24 @@ def main():
                 record_sent(log, email_addr)
                 sent_this_run.append(contact)
                 save_log(cfg["log_path"], log)   # Save after each send (safe against crashes)
+                
+                # Notify tracking server of successful send
+                tracker_url = cfg.get("tracker_url", "").rstrip("/")
+                if tracker_url:
+                    try:
+                        import urllib.request as _urllib
+                        import json as _json
+                        req = _urllib.Request(
+                            f"{tracker_url}/api/log_send",
+                            data=_json.dumps({"email": email_addr, "company": company}).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST"
+                        )
+                        with _urllib.urlopen(req, timeout=5) as resp:
+                            pass
+                    except Exception as te:
+                        print(f"         Tracker API Log Warning: {te}")
+                
                 print(f"         SENT")
             except Exception as e:
                 print(f"         FAILED: {e}")

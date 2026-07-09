@@ -26,6 +26,7 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
+        # Logs actual email opens
         conn.execute("""
             CREATE TABLE IF NOT EXISTS opens (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +37,40 @@ def init_db():
                 user_agent  TEXT    DEFAULT ''
             )
         """)
+        # Logs every sent email
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sends (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                email       TEXT    NOT NULL UNIQUE,
+                company     TEXT    DEFAULT '',
+                sent_at     TEXT    NOT NULL
+            )
+        """)
         conn.commit()
+
+
+# ── Tracking API to record sends ─────────────────────────────────────────────
+@app.route("/api/log_send", methods=["POST"])
+def log_send():
+    data = request.get_json() or {}
+    email = data.get("email")
+    company = data.get("company", "")
+    sent_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    if not email:
+        return jsonify({"error": "Missing email"}), 400
+
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO sends (email, company, sent_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(email) DO UPDATE SET company=excluded.company, sent_at=excluded.sent_at",
+                (email, company, sent_at)
+            )
+            conn.commit()
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Tracking pixel endpoint ───────────────────────────────────────────────────
@@ -58,6 +92,12 @@ def track(encoded):
 
     try:
         with get_db() as conn:
+            # First, ensure the email is recorded as sent (fallback if log_send missed it)
+            conn.execute(
+                "INSERT OR IGNORE INTO sends (email, company, sent_at) VALUES (?, ?, ?)",
+                (email, company, opened_at)
+            )
+            # Log the open
             conn.execute(
                 "INSERT INTO opens (email, company, opened_at, ip, user_agent) VALUES (?,?,?,?,?)",
                 (email, company, opened_at, ip, ua),
@@ -91,7 +131,7 @@ DASHBOARD = """<!DOCTYPE html>
     --text:    #e2e8f0;
     --muted:   #64748b;
     --green:   #22c55e;
-    --red:     #ef4444;
+    --blue:    #3b82f6;
   }
 
   body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
@@ -123,6 +163,26 @@ DASHBOARD = """<!DOCTYPE html>
                 background: linear-gradient(135deg, var(--accent), var(--accent2));
                 -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
+  /* Search & Actions */
+  .toolbar {
+    margin-bottom: 1.5rem;
+  }
+  .search-input {
+    width: 100%;
+    max-width: 400px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.875rem;
+  }
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
   /* Tables */
   .section  { background: var(--surface); border: 1px solid var(--border);
               border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
@@ -138,24 +198,46 @@ DASHBOARD = """<!DOCTYPE html>
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: rgba(108,99,255,0.05); }
 
-  .pill     { background: rgba(34,197,94,0.15); color: var(--green); padding: 0.2rem 0.6rem;
-              border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
+  /* Pills */
+  .pill-opened { background: rgba(59,130,246,0.15); color: var(--blue); padding: 0.2rem 0.6rem;
+                 border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
+  .pill-sent   { background: rgba(34,197,94,0.15); color: var(--green); padding: 0.2rem 0.6rem;
+                 border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
 
   .empty    { text-align: center; color: var(--muted); padding: 2rem;
               font-size: 0.875rem; }
 </style>
+<script>
+  function filterTable() {
+    const query = document.getElementById('search').value.toLowerCase();
+    const rows = document.querySelectorAll('#email-table tbody tr');
+    rows.forEach(row => {
+      const email = row.cells[0].textContent.toLowerCase();
+      const company = row.cells[1].textContent.toLowerCase();
+      if (email.includes(query) || company.includes(query)) {
+        row.style.display = '';
+      } else {
+        row.style.display = 'none';
+      }
+    });
+  }
+</script>
 </head>
 <body>
 
 <div class="header">
   <div>
     <h1>📬 Cold Mail Tracker</h1>
-    <div class="subtitle">Real-time email open tracking for your outreach campaign</div>
+    <div class="subtitle">Real-time email outreach status and open tracking</div>
   </div>
   <div class="badge">Live</div>
 </div>
 
 <div class="cards">
+  <div class="card">
+    <div class="card-label">Total Sent</div>
+    <div class="card-value">{{ total_sent }}</div>
+  </div>
   <div class="card">
     <div class="card-label">Total Opens</div>
     <div class="card-value">{{ total_opens }}</div>
@@ -165,66 +247,48 @@ DASHBOARD = """<!DOCTYPE html>
     <div class="card-value">{{ unique_opens }}</div>
   </div>
   <div class="card">
-    <div class="card-label">Companies</div>
-    <div class="card-value">{{ companies }}</div>
-  </div>
-  <div class="card">
     <div class="card-label">Open Rate</div>
     <div class="card-value">{{ open_rate }}%</div>
   </div>
 </div>
 
+<div class="toolbar">
+  <input type="text" id="search" onkeyup="filterTable()" class="search-input" placeholder="Search by email or company...">
+</div>
+
 <div class="section">
-  <div class="section-title">🕐 Recent Opens</div>
-  {% if recent %}
-  <table>
+  <div class="section-title">📧 Outreach Status</div>
+  {% if outreach %}
+  <table id="email-table">
     <thead>
       <tr>
         <th>Email</th>
         <th>Company</th>
-        <th>Opened At (UTC)</th>
+        <th>Sent At (UTC)</th>
+        <th>Last Opened (UTC)</th>
         <th>Status</th>
       </tr>
     </thead>
     <tbody>
-      {% for row in recent %}
+      {% for row in outreach %}
       <tr>
         <td>{{ row.email }}</td>
         <td>{{ row.company }}</td>
-        <td>{{ row.opened_at }}</td>
-        <td><span class="pill">Opened</span></td>
+        <td>{{ row.sent_at }}</td>
+        <td>{{ row.opened_at if row.opened_at else '-' }}</td>
+        <td>
+          {% if row.opens_count and row.opens_count > 0 %}
+            <span class="pill-opened">Opened ({{ row.opens_count }})</span>
+          {% else %}
+            <span class="pill-sent">Sent</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <div class="empty">No opens tracked yet. Send some emails first!</div>
-  {% endif %}
-</div>
-
-<div class="section">
-  <div class="section-title">🏢 Opens by Company</div>
-  {% if by_company %}
-  <table>
-    <thead>
-      <tr>
-        <th>Company</th>
-        <th>Total Opens</th>
-        <th>Unique Openers</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in by_company %}
-      <tr>
-        <td>{{ row.company }}</td>
-        <td>{{ row.opens }}</td>
-        <td>{{ row.unique_opens }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty">No data yet.</div>
+  <div class="empty">No emails tracked yet. Start your outreach campaign!</div>
   {% endif %}
 </div>
 
@@ -235,27 +299,31 @@ DASHBOARD = """<!DOCTYPE html>
 @app.route("/stats")
 def stats():
     with get_db() as conn:
+        total_sent    = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
         total_opens   = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
         unique_opens  = conn.execute("SELECT COUNT(DISTINCT email) FROM opens").fetchone()[0]
-        companies     = conn.execute("SELECT COUNT(DISTINCT company) FROM opens WHERE company != ''").fetchone()[0]
-        recent        = conn.execute(
-            "SELECT email, company, opened_at FROM opens ORDER BY opened_at DESC LIMIT 100"
-        ).fetchall()
-        by_company    = conn.execute(
-            "SELECT company, COUNT(*) as opens, COUNT(DISTINCT email) as unique_opens "
-            "FROM opens WHERE company != '' GROUP BY company ORDER BY opens DESC LIMIT 30"
-        ).fetchall()
 
-    open_rate = round((unique_opens / max(total_opens, 1)) * 100) if total_opens else 0
+        # Select all sent emails and join with open stats
+        outreach = conn.execute("""
+            SELECT 
+                s.email,
+                s.company,
+                s.sent_at,
+                (SELECT COUNT(*) FROM opens o WHERE o.email = s.email) as opens_count,
+                (SELECT MAX(opened_at) FROM opens o WHERE o.email = s.email) as opened_at
+            FROM sends s
+            ORDER BY s.sent_at DESC
+        """).fetchall()
+
+    open_rate = round((unique_opens / max(total_sent, 1)) * 100) if total_sent else 0
 
     return render_template_string(
         DASHBOARD,
+        total_sent=total_sent,
         total_opens=total_opens,
         unique_opens=unique_opens,
-        companies=companies,
         open_rate=open_rate,
-        recent=recent,
-        by_company=by_company,
+        outreach=outreach,
     )
 
 
