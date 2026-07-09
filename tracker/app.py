@@ -233,7 +233,7 @@ function filterTable(){
   var q=document.getElementById('search').value.toLowerCase();
   document.querySelectorAll('#email-table tbody tr').forEach(function(r){
     var match=(r.dataset.email||'').toLowerCase().includes(q)||(r.dataset.company||'').toLowerCase().includes(q);
-    var fmatch=currentFilter==='all'||(r.dataset.status||''===currentFilter);
+    var fmatch=currentFilter==='all'||(r.dataset.status===currentFilter);
     r.style.display=(match&&fmatch)?'':'none';
   });
 }
@@ -255,6 +255,7 @@ function setFilter(f){
   <div class="card"><div class="card-label">Total Opens</div><div class="card-value grad">{{ total_opens }}</div></div>
   <div class="card"><div class="card-label">Hard Bounces</div><div class="card-value red-g">{{ hard_bounces }}</div></div>
   <div class="card"><div class="card-label">Soft Bounces</div><div class="card-value yellow-g">{{ soft_bounces }}</div></div>
+  <div class="card"><div class="card-label">Bounce Rate</div><div class="card-value red-g">{{ bounce_rate }}%</div></div>
   <div class="card"><div class="card-label">Open Rate</div><div class="card-value green-g">{{ open_rate }}%</div></div>
 </div>
 <div class="toolbar">
@@ -330,10 +331,11 @@ def stats():
                    (SELECT MAX(opened_at) FROM opens o WHERE o.email=s.email) as opened_at
             FROM sends s ORDER BY s.sent_at DESC
         """).fetchall()
-    open_rate = round((unique_opens / max(total_sent,1)) * 100) if total_sent else 0
+    open_rate   = round((unique_opens / max(total_sent,1)) * 100) if total_sent else 0
+    bounce_rate = round(((hard_bounces + soft_bounces) / max(total_sent,1)) * 100) if total_sent else 0
     return render_template_string(DASHBOARD,
         total_sent=total_sent, total_opens=total_opens, unique_opens=unique_opens,
-        hard_bounces=hard_bounces, soft_bounces=soft_bounces,
+        hard_bounces=hard_bounces, soft_bounces=soft_bounces, bounce_rate=bounce_rate,
         open_rate=open_rate, outreach=outreach)
 
 
