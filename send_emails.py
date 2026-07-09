@@ -37,8 +37,8 @@ from email import encoders
 import os as _os
 
 CONFIG = {
-    "your_email":    _os.environ.get("GMAIL_ADDRESS",      "singlaarnav2405@gmail.com"),
-    "app_password":  _os.environ.get("GMAIL_APP_PASSWORD", "behg xlex wjfv knnm"),
+    "your_email":    _os.environ.get("GMAIL_ADDRESS",      "arnavsingla2405@gmail.com"),
+    "app_password":  _os.environ.get("GMAIL_APP_PASSWORD", ""), # Generate a new app password for this Gmail account
     "your_name":     "Arnav Singla",
     "resume_path":   "ARNAV-RESUME.pdf",
     "db_path":       "turso-full.db",
