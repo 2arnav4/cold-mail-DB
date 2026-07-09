@@ -495,6 +495,144 @@ def print_summary(sent: list, skipped: int, remaining_today: int, dry_run: bool)
     print(f"{'─'*50}\n")
 
 
+def check_and_sync_bounces(cfg: dict) -> list:
+    """Connects to Gmail via IMAP, finds delivery status failure emails,
+    extracts the bounced email addresses, registers them locally and on the Render tracker API,
+    and removes them from the local SQLite database."""
+    import imaplib
+    import email as _email
+    import re
+    import urllib.request as _urllib
+    import json as _json
+    from datetime import datetime
+
+    print("Checking Gmail for new bounces via IMAP...")
+    email_addr = cfg["your_email"]
+    app_pwd = cfg["app_password"].replace(" ", "")
+    tracker_url = cfg.get("tracker_url", "").rstrip("/")
+
+    bounced_emails = []
+
+    try:
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail.login(email_addr, app_pwd)
+        mail.select("INBOX")
+
+        # Search for failure notifications from Mailer-Daemon
+        status, messages = mail.search(None, '(FROM "mailer-daemon@googlemail.com" SUBJECT "Delivery Status Notification (Failure)")')
+        if status != "OK":
+            print("  No bounce notification messages found.")
+            return []
+
+        message_ids = messages[0].split()
+        if not message_ids:
+            print("  No new bounces found in Inbox.")
+            return []
+
+        print(f"  Scanning {len(message_ids)} bounce notification emails...")
+
+        # Parse emails (limit to last 50 to prevent taking too long)
+        for msg_id in message_ids[-50:]:
+            res, msg_data = mail.fetch(msg_id, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    original_msg = _email.message_from_bytes(response_part[1])
+                    body = ""
+                    if original_msg.is_multipart():
+                        for part in original_msg.walk():
+                            content_type = part.get_content_type()
+                            if content_type == "text/plain":
+                                body += part.get_payload(decode=True).decode(errors="ignore")
+                    else:
+                        body = original_msg.get_payload(decode=True).decode(errors="ignore")
+
+                    # Look for standard failure headers in the bounce report body
+                    # E.g. "Failed recipient: target@domain.com" or "To: target@domain.com"
+                    matches = re.findall(
+                        r"(?:Failed recipient|To|Delivered-To|Final-Recipient; rfc822):\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?",
+                        body,
+                        re.IGNORECASE
+                    )
+                    for m in matches:
+                        # Exclude self emails or generic postmaster targets
+                        if m.lower() != email_addr.lower() and m not in bounced_emails:
+                            bounced_emails.append(m)
+
+        mail.close()
+        mail.logout()
+    except Exception as e:
+        print(f"  Warning: IMAP bounce check failed: {e}")
+        return []
+
+    if not bounced_emails:
+        print("  No bounced addresses detected.")
+        return []
+
+    print(f"  Detected {len(bounced_emails)} bounced email addresses: {bounced_emails}")
+
+    # Load logs to record the bounces
+    log = load_log(cfg["log_path"])
+    failed = load_failed_log(cfg["log_path"])
+    existing_failed = {item["email"] for item in failed}
+    
+    new_bounces_logged = 0
+
+    for email in bounced_emails:
+        # Add to local sent_log.json to block future attempts
+        if email not in log["sent"]:
+            log["sent"].append(email)
+            # Subtract from today's daily count if it was sent today
+            today = date.today().strftime("%Y-%m-%d")
+            if today in log["daily"]:
+                log["daily"][today] = max(0, log["daily"][today] - 1)
+
+        # Add to failed log
+        if email not in existing_failed:
+            failed.append({
+                "email": email,
+                "name": "",
+                "company": "",
+                "error": "Bounce — invalid address (auto-detected)",
+                "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            new_bounces_logged += 1
+
+            # Report bounce to Render Tracker API
+            if tracker_url:
+                try:
+                    req = _urllib.Request(
+                        f"{tracker_url}/api/log_bounce",
+                        data=_json.dumps({"email": email, "reason": "Bounce — invalid address (auto-detected)"}).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST"
+                    )
+                    with _urllib.urlopen(req, timeout=5):
+                        pass
+                except Exception as te:
+                    print(f"    Tracker API log_bounce failed for {email}: {te}")
+
+    # Save files if updates happened
+    save_log(cfg["log_path"], log)
+    failed_path = cfg["log_path"].replace(".json", "_failed.json")
+    with open(failed_path, "w") as f:
+        _json.dump(failed, f, indent=2)
+
+    # Clean local SQLite database contacts
+    try:
+        conn = sqlite3.connect(cfg["db_path"])
+        cur = conn.cursor()
+        cur.executemany("DELETE FROM contacts WHERE email = ?", [(e,) for e in bounced_emails])
+        conn.commit()
+        deleted_count = conn.total_changes
+        conn.close()
+        print(f"  Removed {deleted_count} bounced contacts from local database.")
+    except Exception as dbe:
+        print(f"  Warning: Database deletion of bounced emails failed: {dbe}")
+
+    print(f"  Successfully synced {new_bounces_logged} new bounces.")
+    return bounced_emails
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cold Mail Sender")
     parser.add_argument("--dry-run", action="store_true",
@@ -503,10 +641,14 @@ def main():
                         help="Override daily limit for this run")
     parser.add_argument("--show-queue", action="store_true",
                         help="Show the next contacts that would be emailed and exit")
+    parser.add_argument("--check-bounces", action="store_true",
+                        help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit")
     args = parser.parse_args()
 
-    dry_run = args.dry_run
-    cfg = CONFIG.copy()
+    # Handle manual bounce check flag
+    if args.check_bounces:
+        check_and_sync_bounces(cfg)
+        sys.exit(0)
 
     # Validate config
     if not dry_run:
@@ -516,6 +658,10 @@ def main():
         if cfg["app_password"] == "xxxx xxxx xxxx xxxx":
             print("ERROR: Please set your Gmail app_password in CONFIG before running.")
             sys.exit(1)
+
+    # Automatically check for bounces on startup (if not a dry run)
+    if not dry_run:
+        check_and_sync_bounces(cfg)
 
     # Load state
     log = load_log(cfg["log_path"])
