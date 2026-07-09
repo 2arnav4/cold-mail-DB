@@ -29,23 +29,35 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 # ─────────────────────────────────────────────
-#  CONFIG — credentials via environment variables
-#  export GMAIL_ADDRESS="you@gmail.com"
-#  export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
-#  export TRACKER_URL="https://your-tracker.onrender.com"
+#  CONFIG — loaded from .env file automatically
 # ─────────────────────────────────────────────
 import os as _os
 
+def _load_env(path=".env"):
+    """Parse a .env file and inject into os.environ (no dependencies needed)."""
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                _os.environ.setdefault(key.strip(), val.strip())
+    except FileNotFoundError:
+        pass  # .env is optional; fall back to real env vars
+
+_load_env()
+
 CONFIG = {
-    "your_email":    _os.environ.get("GMAIL_ADDRESS",      "arnavsingla2405@gmail.com"),
-    "app_password":  _os.environ.get("GMAIL_APP_PASSWORD", ""), # Generate a new app password for this Gmail account
+    "your_email":    _os.environ.get("GMAIL_ADDRESS",      ""),
+    "app_password":  _os.environ.get("GMAIL_APP_PASSWORD", ""),
     "your_name":     "Arnav Singla",
     "resume_path":   "ARNAV-RESUME.pdf",
     "db_path":       "turso-full.db",
     "template_path": "template.txt",
     "log_path":      "sent_log.json",
-    "daily_limit":   100,
-    "tracker_url":   _os.environ.get("TRACKER_URL", ""),   # set after Render deploy
+    "daily_limit":   20,
+    "tracker_url":   _os.environ.get("TRACKER_URL", ""),
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
