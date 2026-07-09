@@ -43,9 +43,20 @@ def init_db():
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 email       TEXT    NOT NULL UNIQUE,
                 company     TEXT    DEFAULT '',
-                sent_at     TEXT    NOT NULL
+                sent_at     TEXT    NOT NULL,
+                status      TEXT    DEFAULT 'sent',
+                bounce_reason TEXT  DEFAULT ''
             )
         """)
+        # Migrate existing DBs that don't have the status or bounce_reason columns yet
+        try:
+            conn.execute("ALTER TABLE sends ADD COLUMN status TEXT DEFAULT 'sent'")
+        except sqlite3.OperationalError:
+            pass # column already exists
+        try:
+            conn.execute("ALTER TABLE sends ADD COLUMN bounce_reason TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass # column already exists
         conn.commit()
 
 
@@ -63,9 +74,37 @@ def log_send():
     try:
         with get_db() as conn:
             conn.execute(
-                "INSERT INTO sends (email, company, sent_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(email) DO UPDATE SET company=excluded.company, sent_at=excluded.sent_at",
+                "INSERT INTO sends (email, company, sent_at, status, bounce_reason) VALUES (?, ?, ?, 'sent', '') "
+                "ON CONFLICT(email) DO UPDATE SET company=excluded.company, sent_at=excluded.sent_at, status='sent', bounce_reason=''",
                 (email, company, sent_at)
+            )
+            conn.commit()
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Tracking API to record bounces ───────────────────────────────────────────
+@app.route("/api/log_bounce", methods=["POST"])
+def log_bounce():
+    data = request.get_json() or {}
+    email = data.get("email")
+    reason = data.get("reason", "Bounce — invalid address")
+
+    if not email:
+        return jsonify({"error": "Missing email"}), 400
+
+    try:
+        with get_db() as conn:
+            # Mark it as bounced
+            conn.execute(
+                "UPDATE sends SET status='bounced', bounce_reason=? WHERE email=?",
+                (reason, email)
+            )
+            # Create a placeholder in sends if it somehow wasn't logged during send
+            conn.execute(
+                "INSERT OR IGNORE INTO sends (email, status, bounce_reason, sent_at) VALUES (?, 'bounced', ?, ?)",
+                (email, reason, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
             )
             conn.commit()
         return jsonify({"status": "success"}), 200
@@ -132,6 +171,7 @@ DASHBOARD = """<!DOCTYPE html>
     --muted:   #64748b;
     --green:   #22c55e;
     --blue:    #3b82f6;
+    --red:     #ef4444;
   }
 
   body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
@@ -203,6 +243,8 @@ DASHBOARD = """<!DOCTYPE html>
                  border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
   .pill-sent   { background: rgba(34,197,94,0.15); color: var(--green); padding: 0.2rem 0.6rem;
                  border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
+  .pill-bounced { background: rgba(239,68,68,0.15); color: var(--red); padding: 0.2rem 0.6rem;
+                  border-radius: 9999px; font-size: 0.7rem; font-weight: 600; }
 
   .empty    { text-align: center; color: var(--muted); padding: 2rem;
               font-size: 0.875rem; }
@@ -243,8 +285,8 @@ DASHBOARD = """<!DOCTYPE html>
     <div class="card-value">{{ total_opens }}</div>
   </div>
   <div class="card">
-    <div class="card-label">Unique Openers</div>
-    <div class="card-value">{{ unique_opens }}</div>
+    <div class="card-label">Total Bounces</div>
+    <div class="card-value" style="background: linear-gradient(135deg, #ef4444, #f97316); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{{ total_bounces }}</div>
   </div>
   <div class="card">
     <div class="card-label">Open Rate</div>
@@ -277,7 +319,9 @@ DASHBOARD = """<!DOCTYPE html>
         <td>{{ row.sent_at }}</td>
         <td>{{ row.opened_at if row.opened_at else '-' }}</td>
         <td>
-          {% if row.opens_count and row.opens_count > 0 %}
+          {% if row.status == 'bounced' %}
+            <span class="pill-bounced" title="{{ row.bounce_reason }}">Bounced</span>
+          {% elif row.opens_count and row.opens_count > 0 %}
             <span class="pill-opened">Opened ({{ row.opens_count }})</span>
           {% else %}
             <span class="pill-sent">Sent</span>
@@ -301,6 +345,7 @@ def stats():
     with get_db() as conn:
         total_sent    = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
         total_opens   = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
+        total_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced'").fetchone()[0]
         unique_opens  = conn.execute("SELECT COUNT(DISTINCT email) FROM opens").fetchone()[0]
 
         # Select all sent emails and join with open stats
@@ -309,6 +354,8 @@ def stats():
                 s.email,
                 s.company,
                 s.sent_at,
+                s.status,
+                s.bounce_reason,
                 (SELECT COUNT(*) FROM opens o WHERE o.email = s.email) as opens_count,
                 (SELECT MAX(opened_at) FROM opens o WHERE o.email = s.email) as opened_at
             FROM sends s
@@ -321,6 +368,7 @@ def stats():
         DASHBOARD,
         total_sent=total_sent,
         total_opens=total_opens,
+        total_bounces=total_bounces,
         unique_opens=unique_opens,
         open_rate=open_rate,
         outreach=outreach,
