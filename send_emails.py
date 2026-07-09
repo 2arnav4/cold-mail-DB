@@ -406,9 +406,16 @@ def text_to_html(text: str, pixel_tag: str = "") -> str:
     # Escape HTML special chars first
     escaped = html_lib.escape(text)
 
-    # Auto-link https:// and http:// URLs — all URLs in templates already have https:// prefix
+    # 1. Parse markdown links [Link Text](URL)
     escaped = re.sub(
-        r'(https?://[^\s<>"]+)',
+        r'\[([^\]]+)\]\((https?://[^)]+)\)',
+        r'<a href="\2">\1</a>',
+        escaped
+    )
+
+    # 2. Auto-link remaining raw https:// and http:// URLs (ignoring already linked ones)
+    escaped = re.sub(
+        r'(?<!href=")(?<!">)(https?://[^\s<>"]+)',
         r'<a href="\1">\1</a>',
         escaped
     )
