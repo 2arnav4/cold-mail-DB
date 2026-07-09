@@ -546,10 +546,8 @@ def check_and_sync_bounces(cfg: dict) -> list:
                     else:
                         body = original_msg.get_payload(decode=True).decode(errors="ignore")
 
-                    # Look for standard failure headers in the bounce report body
-                    # E.g. "Failed recipient: target@domain.com" or "To: target@domain.com"
                     matches = re.findall(
-                        r"(?:Failed recipient|To|Delivered-To|Final-Recipient; rfc822):\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?",
+                        r"(?:Failed recipient|To|Delivered-To|Final-Recipient; rfc822|Your message wasn't delivered to)\s*<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?",
                         body,
                         re.IGNORECASE
                     )
