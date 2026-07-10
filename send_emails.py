@@ -306,7 +306,7 @@ CONTACT_QUERY = """
         ct.email IS NOT NULL
         AND ct.is_invalid = 0
         AND ct.email != ''
-    ORDER BY ct.id ASC
+    ORDER BY ct.priority DESC, ct.id ASC
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
