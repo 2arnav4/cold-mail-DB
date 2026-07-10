@@ -13,3 +13,6 @@ __pycache__/
 # ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
 *.xlsx
+bounce_scan.log
+sent_log_opens.json
+
