@@ -250,6 +250,40 @@ function setFilter(f){
   document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.toggle('active',b.dataset.filter===f);});
   filterTable();
 }
+document.addEventListener("DOMContentLoaded", function() {
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  document.querySelectorAll(".datetime-cell").forEach(function(cell) {
+    const utcStr = cell.getAttribute("data-utc");
+    if (!utcStr) {
+      cell.textContent = "—";
+      return;
+    }
+    // Replace space with T and append Z to force parsing as UTC
+    const date = new Date(utcStr.replace(' ', 'T') + 'Z');
+    if (isNaN(date.getTime())) return;
+
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+
+    let suffix = "th";
+    if (day < 11 || day > 13) {
+      switch (day % 10) {
+        case 1: suffix = "st"; break;
+        case 2: suffix = "nd"; break;
+        case 3: suffix = "rd"; break;
+      }
+    }
+
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+
+    cell.textContent = day + suffix + " " + month + " " + year + ", " + hours + ":" + minutes + ampm;
+  });
+});
 </script>
 </head>
 <body>
@@ -278,7 +312,7 @@ function setFilter(f){
   {% if outreach %}
   <table id="email-table">
     <thead><tr>
-      <th>Email</th><th>Company</th><th>Sent (UTC)</th><th>Last Open (UTC)</th>
+      <th>Email</th><th>Company</th><th>Sent</th><th>Last Open</th>
       <th>Opens</th><th>Status</th><th>Bounce Reason</th><th>Type / Retry</th>
     </tr></thead>
     <tbody>
@@ -287,8 +321,8 @@ function setFilter(f){
         data-status="{{ 'bounced' if row.status == 'bounced' else ('opened' if row.opens_count and row.opens_count > 0 else 'sent') }}">
       <td class="email-cell">{{ row.email }}</td>
       <td class="company-cell">{{ row.company or '—' }}</td>
-      <td style="color:var(--muted);font-size:.78rem;">{{ row.sent_at or '—' }}</td>
-      <td style="color:var(--muted);font-size:.78rem;">{{ row.opened_at or '—' }}</td>
+      <td class="datetime-cell" data-utc="{{ row.sent_at or '' }}" style="color:var(--muted);font-size:.78rem;">{{ row.sent_at or '—' }}</td>
+      <td class="datetime-cell" data-utc="{{ row.opened_at or '' }}" style="color:var(--muted);font-size:.78rem;">{{ row.opened_at or '—' }}</td>
       <td style="text-align:center;">
         {% if row.opens_count and row.opens_count > 0 %}
           <span style="color:var(--blue);font-weight:700;">{{ row.opens_count }}</span>
