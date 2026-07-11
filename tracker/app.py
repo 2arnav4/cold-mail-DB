@@ -17,10 +17,12 @@ PIXEL = (
     b"\x44\x01\x00\x3b"
 )
 
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     with get_db() as conn:
@@ -61,10 +63,10 @@ def init_db():
             )
         """)
         for col, definition in [
-            ("status",        "TEXT DEFAULT 'sent'"),
+            ("status", "TEXT DEFAULT 'sent'"),
             ("bounce_reason", "TEXT DEFAULT ''"),
-            ("bounce_type",   "TEXT DEFAULT ''"),
-            ("retry_after",   "TEXT DEFAULT ''"),
+            ("bounce_type", "TEXT DEFAULT ''"),
+            ("retry_after", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE sends ADD COLUMN {col} {definition}")
@@ -74,25 +76,30 @@ def init_db():
             conn.execute("ALTER TABLE opens ADD COLUMN is_bot INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
-        
+
         # Clean up fake bounces from local code compilation crashes
         conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
         # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
-        conn.execute("DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')")
+        conn.execute(
+            "DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')"
+        )
         conn.commit()
+
 
 # ── Keep-alive ping ───────────────────────────────────────────────────────────
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok", "ts": datetime.utcnow().isoformat()}), 200
 
+
 KNOWN_PROXY_UA_SUBSTRINGS = [
-    "GoogleImageProxy",       # Gmail's image proxy — fetches once, caches on Google's side
-    "Google-Safety",          # Google link/attachment scanning
-    "MicrosoftPreview",       # Outlook/O365 link preview
+    "GoogleImageProxy",  # Gmail's image proxy — fetches once, caches on Google's side
+    "Google-Safety",  # Google link/attachment scanning
+    "MicrosoftPreview",  # Outlook/O365 link preview
     "OutlookSafeLinksScanner",
-    "ATP-Scan",               # Microsoft Defender for Office 365 Safe Links
+    "ATP-Scan",  # Microsoft Defender for Office 365 Safe Links
 ]
+
 
 def classify_bot(user_agent: str, seconds_since_send: float) -> bool:
     ua = (user_agent or "").lower()
@@ -102,11 +109,12 @@ def classify_bot(user_agent: str, seconds_since_send: float) -> bool:
         return True
     return False
 
+
 # ── Log a sent email ──────────────────────────────────────────────────────────
 @app.route("/api/log_send", methods=["POST"])
 def log_send():
-    data    = request.get_json() or {}
-    email   = data.get("email")
+    data = request.get_json() or {}
+    email = data.get("email")
     company = data.get("company", "")
     sent_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     if not email:
@@ -118,19 +126,20 @@ def log_send():
                 "VALUES (?, ?, ?, 'sent', '', '', '') "
                 "ON CONFLICT(email) DO UPDATE SET company=excluded.company, sent_at=excluded.sent_at, "
                 "status='sent', bounce_reason='', bounce_type='', retry_after=''",
-                (email, company, sent_at)
+                (email, company, sent_at),
             )
             conn.commit()
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # ── Log a bounced email ───────────────────────────────────────────────────────
 @app.route("/api/log_bounce", methods=["POST"])
 def log_bounce():
-    data        = request.get_json() or {}
-    email       = data.get("email")
-    reason      = data.get("reason",      "Bounce — unknown reason")
+    data = request.get_json() or {}
+    email = data.get("email")
+    reason = data.get("reason", "Bounce — unknown reason")
     bounce_type = data.get("bounce_type", "hard")
     retry_after = data.get("retry_after", "")
     if not email:
@@ -139,32 +148,39 @@ def log_bounce():
         with get_db() as conn:
             conn.execute(
                 "UPDATE sends SET status='bounced', bounce_reason=?, bounce_type=?, retry_after=? WHERE email=?",
-                (reason, bounce_type, retry_after, email)
+                (reason, bounce_type, retry_after, email),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO sends (email, status, bounce_reason, bounce_type, retry_after, sent_at) "
                 "VALUES (?, 'bounced', ?, ?, ?, ?)",
-                (email, reason, bounce_type, retry_after, datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
+                (
+                    email,
+                    reason,
+                    bounce_type,
+                    retry_after,
+                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                ),
             )
             conn.commit()
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # ── Bulk sync ─────────────────────────────────────────────────────────────────
 @app.route("/api/bulk_sync", methods=["POST"])
 def bulk_sync():
-    data    = request.get_json() or {}
-    sends   = data.get("sends",   [])
+    data = request.get_json() or {}
+    sends = data.get("sends", [])
     bounces = data.get("bounces", [])
-    opens   = data.get("opens",   [])
+    opens = data.get("opens", [])
     try:
         with get_db() as conn:
             for s in sends:
                 conn.execute(
                     "INSERT OR IGNORE INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
                     "VALUES (?, ?, ?, 'sent', '', '', '')",
-                    (s.get("email",""), s.get("company",""), s.get("sent_at",""))
+                    (s.get("email", ""), s.get("company", ""), s.get("sent_at", "")),
                 )
             for b in bounces:
                 conn.execute(
@@ -172,21 +188,39 @@ def bulk_sync():
                     "VALUES (?, ?, ?, 'bounced', ?, ?, ?) "
                     "ON CONFLICT(email) DO UPDATE SET status='bounced', bounce_reason=excluded.bounce_reason, "
                     "bounce_type=excluded.bounce_type, retry_after=excluded.retry_after",
-                    (b.get("email",""), b.get("company",""), b.get("sent_at",""),
-                     b.get("reason","Bounce — invalid address"),
-                     b.get("bounce_type","hard"),
-                     b.get("retry_after",""))
+                    (
+                        b.get("email", ""),
+                        b.get("company", ""),
+                        b.get("sent_at", ""),
+                        b.get("reason", "Bounce — invalid address"),
+                        b.get("bounce_type", "hard"),
+                        b.get("retry_after", ""),
+                    ),
                 )
             for o in opens:
                 conn.execute(
                     "INSERT OR IGNORE INTO opens (email, company, opened_at, ip, user_agent, is_bot) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (o.get("email",""), o.get("company",""), o.get("opened_at",""), o.get("ip",""), o.get("user_agent",""), o.get("is_bot", 0))
+                    (
+                        o.get("email", ""),
+                        o.get("company", ""),
+                        o.get("opened_at", ""),
+                        o.get("ip", ""),
+                        o.get("user_agent", ""),
+                        o.get("is_bot", 0),
+                    ),
                 )
             conn.commit()
-        return jsonify({"synced_sends": len(sends), "synced_bounces": len(bounces), "synced_opens": len(opens)}), 200
+        return jsonify(
+            {
+                "synced_sends": len(sends),
+                "synced_bounces": len(bounces),
+                "synced_opens": len(opens),
+            }
+        ), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 # ── Tracking pixel ────────────────────────────────────────────────────────────
 @app.route("/t/<path:encoded>.gif")
@@ -194,20 +228,22 @@ def track(encoded):
     try:
         padding = 4 - len(encoded) % 4
         decoded = base64.urlsafe_b64decode(encoded + "=" * padding).decode()
-        parts   = decoded.split("|", 1)
-        email   = parts[0]
+        parts = decoded.split("|", 1)
+        email = parts[0]
         company = parts[1] if len(parts) > 1 else ""
     except Exception:
         email, company = "unknown", ""
 
-    ip        = request.headers.get("X-Forwarded-For", request.remote_addr or "")
-    ua        = request.headers.get("User-Agent", "")
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    ua = request.headers.get("User-Agent", "")
     opened_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     seconds_since_send = None
     try:
         with get_db() as conn:
-            row = conn.execute("SELECT sent_at FROM sends WHERE email = ?", (email,)).fetchone()
+            row = conn.execute(
+                "SELECT sent_at FROM sends WHERE email = ?", (email,)
+            ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
                 now_dt = datetime.utcnow()
@@ -221,7 +257,7 @@ def track(encoded):
         with get_db() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO sends (email, company, sent_at) VALUES (?, ?, ?)",
-                (email, company, opened_at)
+                (email, company, opened_at),
             )
             conn.execute(
                 "INSERT INTO opens (email, company, opened_at, ip, user_agent, is_bot) VALUES (?,?,?,?,?,?)",
@@ -232,6 +268,7 @@ def track(encoded):
         print(f"DB error: {e}")
 
     return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
+
 
 # ── Link click tracking ───────────────────────────────────────────────────────
 @app.route("/c/<path:encoded>")
@@ -251,11 +288,13 @@ def click(encoded):
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
     ua = request.headers.get("User-Agent", "")
-    
+
     seconds_since_send = None
     try:
         with get_db() as conn:
-            row = conn.execute("SELECT sent_at FROM sends WHERE email = ?", (email,)).fetchone()
+            row = conn.execute(
+                "SELECT sent_at FROM sends WHERE email = ?", (email,)
+            ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
                 now_dt = datetime.utcnow()
@@ -271,13 +310,14 @@ def click(encoded):
             conn.execute(
                 "INSERT INTO clicks (email, company, clicked_at, ip, user_agent, is_bot, target_url) "
                 "VALUES (?,?,?,?,?,?,?)",
-                (email, company, clicked_at, ip, ua, is_bot, target_url)
+                (email, company, clicked_at, ip, ua, is_bot, target_url),
             )
             conn.commit()
     except Exception as e:
         print(f"DB error logging click: {e}")
 
     return redirect(target_url, code=302)
+
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 DASHBOARD = """<!DOCTYPE html>
@@ -512,22 +552,36 @@ document.addEventListener("DOMContentLoaded", function() {
 def stats():
     with get_db() as conn:
         total_sent = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
-        
+
         # Opens
         total_opens = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
-        unique_opens = conn.execute("SELECT COUNT(DISTINCT email) FROM opens").fetchone()[0]
-        unique_confirmed_opens = conn.execute("SELECT COUNT(DISTINCT email) FROM opens WHERE is_bot=0").fetchone()[0]
-        
+        unique_opens = conn.execute(
+            "SELECT COUNT(DISTINCT email) FROM opens"
+        ).fetchone()[0]
+        unique_confirmed_opens = conn.execute(
+            "SELECT COUNT(DISTINCT email) FROM opens WHERE is_bot=0"
+        ).fetchone()[0]
+
         # Clicks
         total_clicks = conn.execute("SELECT COUNT(*) FROM clicks").fetchone()[0]
-        unique_clicks = conn.execute("SELECT COUNT(DISTINCT email) FROM clicks").fetchone()[0]
-        unique_confirmed_clicks = conn.execute("SELECT COUNT(DISTINCT email) FROM clicks WHERE is_bot=0").fetchone()[0]
+        unique_clicks = conn.execute(
+            "SELECT COUNT(DISTINCT email) FROM clicks"
+        ).fetchone()[0]
+        unique_confirmed_clicks = conn.execute(
+            "SELECT COUNT(DISTINCT email) FROM clicks WHERE is_bot=0"
+        ).fetchone()[0]
 
         # Bounces
-        hard_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='hard'").fetchone()[0]
-        soft_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='soft'").fetchone()[0]
-        unknown_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='unknown'").fetchone()[0]
-        
+        hard_bounces = conn.execute(
+            "SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='hard'"
+        ).fetchone()[0]
+        soft_bounces = conn.execute(
+            "SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='soft'"
+        ).fetchone()[0]
+        unknown_bounces = conn.execute(
+            "SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='unknown'"
+        ).fetchone()[0]
+
         outreach = conn.execute("""
             SELECT s.email, s.company, s.sent_at, s.status,
                    s.bounce_reason, s.bounce_type, s.retry_after,
@@ -540,23 +594,44 @@ def stats():
                    (SELECT group_concat(clicked_at || '|' || is_bot, ',') FROM clicks c WHERE c.email=s.email) as click_details
             FROM sends s ORDER BY s.sent_at DESC
         """).fetchall()
-        
+
     open_rate = round((unique_opens / max(total_sent, 1)) * 100) if total_sent else 0
-    confirmed_open_rate = round((unique_confirmed_opens / max(total_sent, 1)) * 100) if total_sent else 0
-    bounce_rate = round(((hard_bounces + soft_bounces + unknown_bounces) / max(total_sent, 1)) * 100) if total_sent else 0
-    
-    return render_template_string(DASHBOARD,
-        total_sent=total_sent, total_opens=total_opens, unique_opens=unique_opens,
-        unique_confirmed_opens=unique_confirmed_opens, confirmed_open_rate=confirmed_open_rate,
-        total_clicks=total_clicks, unique_clicks=unique_clicks, unique_confirmed_clicks=unique_confirmed_clicks,
-        hard_bounces=hard_bounces, soft_bounces=soft_bounces, unknown_bounces=unknown_bounces,
-        bounce_rate=bounce_rate, open_rate=open_rate, outreach=outreach)
+    confirmed_open_rate = (
+        round((unique_confirmed_opens / max(total_sent, 1)) * 100) if total_sent else 0
+    )
+    bounce_rate = (
+        round(
+            ((hard_bounces + soft_bounces + unknown_bounces) / max(total_sent, 1)) * 100
+        )
+        if total_sent
+        else 0
+    )
+
+    return render_template_string(
+        DASHBOARD,
+        total_sent=total_sent,
+        total_opens=total_opens,
+        unique_opens=unique_opens,
+        unique_confirmed_opens=unique_confirmed_opens,
+        confirmed_open_rate=confirmed_open_rate,
+        total_clicks=total_clicks,
+        unique_clicks=unique_clicks,
+        unique_confirmed_clicks=unique_confirmed_clicks,
+        hard_bounces=hard_bounces,
+        soft_bounces=soft_bounces,
+        unknown_bounces=unknown_bounces,
+        bounce_rate=bounce_rate,
+        open_rate=open_rate,
+        outreach=outreach,
+    )
 
 
 @app.route("/api/stats")
 def api_stats():
     with get_db() as conn:
-        rows = conn.execute("SELECT email, company, opened_at, ip, user_agent, is_bot FROM opens ORDER BY opened_at DESC").fetchall()
+        rows = conn.execute(
+            "SELECT email, company, opened_at, ip, user_agent, is_bot FROM opens ORDER BY opened_at DESC"
+        ).fetchall()
     return jsonify([dict(r) for r in rows])
 
 
