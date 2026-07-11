@@ -77,6 +77,8 @@ def init_db():
         
         # Clean up fake bounces from local code compilation crashes
         conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%name %msg% is not defined%'")
+        # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
+        conn.execute("DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')")
         conn.commit()
 
 # ── Keep-alive ping ───────────────────────────────────────────────────────────

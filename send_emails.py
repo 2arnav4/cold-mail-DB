@@ -353,7 +353,7 @@ def record_failed(log_path: str, contact: dict, error: str):
         "name":    contact.get("contact_name") or "",
         "company": contact.get("company_name") or "",
         "error":   str(error),
-        "time":    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "time":    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     })
     with open(failed_path, "w") as f:
         json.dump(failed, f, indent=2)
@@ -833,7 +833,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
                 "error":       rec["reason"],
                 "bounce_type": rec["bounce_type"],
                 "retry_after": rec["retry_after"],
-                "time":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "time":        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             })
             new_bounces_logged += 1
 
