@@ -3,7 +3,7 @@ import io
 import base64
 import sqlite3
 from datetime import datetime
-from flask import Flask, request, send_file, jsonify, render_template_string
+from flask import Flask, request, send_file, jsonify, render_template_string, redirect
 
 app = Flask(__name__)
 
@@ -32,6 +32,7 @@ def init_db():
                 opened_at   TEXT    NOT NULL,
                 ip          TEXT    DEFAULT '',
                 user_agent  TEXT    DEFAULT '',
+                is_bot      INTEGER DEFAULT 0,
                 UNIQUE(email, opened_at)
             )
         """)
@@ -47,6 +48,18 @@ def init_db():
                 retry_after   TEXT    DEFAULT ''
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS clicks (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                email       TEXT    NOT NULL,
+                company     TEXT    DEFAULT '',
+                clicked_at  TEXT    NOT NULL,
+                ip          TEXT    DEFAULT '',
+                user_agent  TEXT    DEFAULT '',
+                is_bot      INTEGER DEFAULT 0,
+                target_url  TEXT    DEFAULT ''
+            )
+        """)
         for col, definition in [
             ("status",        "TEXT DEFAULT 'sent'"),
             ("bounce_reason", "TEXT DEFAULT ''"),
@@ -57,12 +70,32 @@ def init_db():
                 conn.execute(f"ALTER TABLE sends ADD COLUMN {col} {definition}")
             except sqlite3.OperationalError:
                 pass
+        try:
+            conn.execute("ALTER TABLE opens ADD COLUMN is_bot INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 # ── Keep-alive ping ───────────────────────────────────────────────────────────
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok", "ts": datetime.utcnow().isoformat()}), 200
+
+KNOWN_PROXY_UA_SUBSTRINGS = [
+    "GoogleImageProxy",       # Gmail's image proxy — fetches once, caches on Google's side
+    "Google-Safety",          # Google link/attachment scanning
+    "MicrosoftPreview",       # Outlook/O365 link preview
+    "OutlookSafeLinksScanner",
+    "ATP-Scan",               # Microsoft Defender for Office 365 Safe Links
+]
+
+def classify_bot(user_agent: str, seconds_since_send: float) -> bool:
+    ua = (user_agent or "").lower()
+    if any(sig.lower() in ua for sig in KNOWN_PROXY_UA_SUBSTRINGS):
+        return True
+    if seconds_since_send is not None and seconds_since_send < 10:
+        return True
+    return False
 
 # ── Log a sent email ──────────────────────────────────────────────────────────
 @app.route("/api/log_send", methods=["POST"])
@@ -141,9 +174,9 @@ def bulk_sync():
                 )
             for o in opens:
                 conn.execute(
-                    "INSERT OR IGNORE INTO opens (email, company, opened_at, ip, user_agent) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (o.get("email",""), o.get("company",""), o.get("opened_at",""), o.get("ip",""), o.get("user_agent",""))
+                    "INSERT OR IGNORE INTO opens (email, company, opened_at, ip, user_agent, is_bot) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (o.get("email",""), o.get("company",""), o.get("opened_at",""), o.get("ip",""), o.get("user_agent",""), o.get("is_bot", 0))
                 )
             conn.commit()
         return jsonify({"synced_sends": len(sends), "synced_bounces": len(bounces), "synced_opens": len(opens)}), 200
@@ -166,6 +199,19 @@ def track(encoded):
     ua        = request.headers.get("User-Agent", "")
     opened_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
+    seconds_since_send = None
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT sent_at FROM sends WHERE email = ?", (email,)).fetchone()
+            if row and row["sent_at"]:
+                sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
+                now_dt = datetime.utcnow()
+                seconds_since_send = (now_dt - sent_dt).total_seconds()
+    except Exception as e:
+        print(f"Error calculating seconds_since_send: {e}")
+
+    is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
+
     try:
         with get_db() as conn:
             conn.execute(
@@ -173,14 +219,60 @@ def track(encoded):
                 (email, company, opened_at)
             )
             conn.execute(
-                "INSERT INTO opens (email, company, opened_at, ip, user_agent) VALUES (?,?,?,?,?)",
-                (email, company, opened_at, ip, ua),
+                "INSERT INTO opens (email, company, opened_at, ip, user_agent, is_bot) VALUES (?,?,?,?,?,?)",
+                (email, company, opened_at, ip, ua, is_bot),
             )
             conn.commit()
     except Exception as e:
         print(f"DB error: {e}")
 
     return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
+
+# ── Link click tracking ───────────────────────────────────────────────────────
+@app.route("/c/<path:encoded>")
+def click(encoded):
+    try:
+        padding = 4 - len(encoded) % 4
+        decoded = base64.urlsafe_b64decode(encoded + "=" * padding).decode()
+        parts = decoded.split("|", 2)
+        email = parts[0]
+        company = parts[1] if len(parts) > 1 else ""
+        target_url = parts[2] if len(parts) > 2 else ""
+    except Exception:
+        email, company, target_url = "unknown", "", "/"
+
+    if not target_url:
+        target_url = "/"
+
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    ua = request.headers.get("User-Agent", "")
+    
+    seconds_since_send = None
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT sent_at FROM sends WHERE email = ?", (email,)).fetchone()
+            if row and row["sent_at"]:
+                sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
+                now_dt = datetime.utcnow()
+                seconds_since_send = (now_dt - sent_dt).total_seconds()
+    except Exception as e:
+        print(f"Error calculating seconds_since_send for click: {e}")
+
+    is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
+    clicked_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO clicks (email, company, clicked_at, ip, user_agent, is_bot, target_url) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (email, company, clicked_at, ip, ua, is_bot, target_url)
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"DB error logging click: {e}")
+
+    return redirect(target_url, code=302)
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 DASHBOARD = """<!DOCTYPE html>
@@ -214,7 +306,9 @@ DASHBOARD = """<!DOCTYPE html>
   .filter-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:.6rem 1rem;border-radius:8px;font-size:.8rem;cursor:pointer;transition:all .2s;font-family:inherit}
   .filter-btn:hover,.filter-btn.active{border-color:var(--accent);color:var(--text)}
   .filter-btn.f-opened.active{border-color:var(--blue);color:var(--blue)}
+  .filter-btn.f-clicked.active{border-color:var(--accent2);color:var(--accent2)}
   .filter-btn.f-bounced.active{border-color:var(--red);color:var(--red)}
+  .filter-btn.f-unknown.active{border-color:var(--muted);color:var(--muted)}
   .filter-btn.f-sent.active{border-color:var(--green);color:var(--green)}
   .section{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;margin-bottom:1.5rem;overflow-x:auto}
   .section-title{font-size:1rem;font-weight:600;margin-bottom:1rem}
@@ -229,9 +323,11 @@ DASHBOARD = """<!DOCTYPE html>
   .pill{display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .65rem;border-radius:9999px;font-size:.7rem;font-weight:600;white-space:nowrap}
   .pill-opened{background:rgba(59,130,246,.15);color:var(--blue)}
   .pill-sent{background:rgba(34,197,94,.15);color:var(--green)}
+  .pill-clicked{background:rgba(0,212,170,.15);color:var(--accent2)}
   .pill-bounced{background:rgba(239,68,68,.15);color:var(--red)}
   .pill-hard{background:rgba(239,68,68,.1);color:#fca5a5;font-size:.65rem;border:1px solid rgba(239,68,68,.3)}
   .pill-soft{background:rgba(234,179,8,.1);color:var(--yellow);font-size:.65rem;border:1px solid rgba(234,179,8,.3)}
+  .pill-unknown{background:rgba(100,116,139,.15);color:var(--muted);font-size:.65rem;border:1px solid rgba(100,116,139,.3)}
   .pill-retry{background:rgba(249,115,22,.1);color:var(--orange);font-size:.65rem}
   .empty{text-align:center;color:var(--muted);padding:3rem;font-size:.875rem}
 </style>
@@ -258,7 +354,6 @@ document.addEventListener("DOMContentLoaded", function() {
       cell.textContent = "—";
       return;
     }
-    // Replace space with T and append Z to force parsing as UTC
     const date = new Date(utcStr.replace(' ', 'T') + 'Z');
     if (isNaN(date.getTime())) return;
 
@@ -288,24 +383,26 @@ document.addEventListener("DOMContentLoaded", function() {
 </head>
 <body>
 <div class="header">
-  <div><h1>📬 Cold Mail Tracker</h1><div class="subtitle">Real-time outreach — opens, bounce type &amp; retry status</div></div>
+  <div><h1>📬 Cold Mail Tracker</h1><div class="subtitle">Real-time outreach — opens, clicks, bounce type &amp; retry status</div></div>
   <div class="badge">● Live</div>
 </div>
 <div class="cards">
   <div class="card"><div class="card-label">Total Sent</div><div class="card-value grad">{{ total_sent }}</div></div>
-  <div class="card"><div class="card-label">Unique Opens</div><div class="card-value blue-g">{{ unique_opens }}</div></div>
-  <div class="card"><div class="card-label">Total Opens</div><div class="card-value grad">{{ total_opens }}</div></div>
-  <div class="card"><div class="card-label">Hard Bounces</div><div class="card-value red-g">{{ hard_bounces }}</div></div>
-  <div class="card"><div class="card-label">Soft Bounces</div><div class="card-value yellow-g">{{ soft_bounces }}</div></div>
+  <div class="card"><div class="card-label">Unique Opens (Tot)</div><div class="card-value blue-g">{{ unique_opens }}</div></div>
+  <div class="card"><div class="card-label">Confirmed Opens</div><div class="card-value blue-g" style="background:linear-gradient(135deg,var(--accent),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ unique_confirmed_opens }}</div></div>
+  <div class="card"><div class="card-label">Total Clicks</div><div class="card-value grad" style="background:linear-gradient(135deg,var(--accent2),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ total_clicks }}</div></div>
+  <div class="card"><div class="card-label">Open Rate (Tot)</div><div class="card-value green-g">{{ open_rate }}%</div></div>
+  <div class="card"><div class="card-label">Conf. Open Rate</div><div class="card-value green-g" style="background:linear-gradient(135deg,var(--accent2),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ confirmed_open_rate }}%</div></div>
   <div class="card"><div class="card-label">Bounce Rate</div><div class="card-value red-g">{{ bounce_rate }}%</div></div>
-  <div class="card"><div class="card-label">Open Rate</div><div class="card-value green-g">{{ open_rate }}%</div></div>
 </div>
 <div class="toolbar">
   <input type="text" id="search" oninput="filterTable()" class="search-input" placeholder="Search email or company…">
   <button class="filter-btn active" data-filter="all"     onclick="setFilter('all')">All</button>
   <button class="filter-btn f-sent"    data-filter="sent"    onclick="setFilter('sent')">✉ Sent</button>
   <button class="filter-btn f-opened"  data-filter="opened"  onclick="setFilter('opened')">👁 Opened</button>
+  <button class="filter-btn f-clicked" data-filter="clicked" onclick="setFilter('clicked')">🔗 Clicked</button>
   <button class="filter-btn f-bounced" data-filter="bounced" onclick="setFilter('bounced')">⚠ Bounced</button>
+  <button class="filter-btn f-unknown" data-filter="unknown" onclick="setFilter('unknown')">❔ Unknown</button>
 </div>
 <div class="section">
   <div class="section-title">📧 Outreach Status</div>
@@ -313,24 +410,65 @@ document.addEventListener("DOMContentLoaded", function() {
   <table id="email-table">
     <thead><tr>
       <th>Email</th><th>Company</th><th>Sent</th><th>Last Open</th>
-      <th>Opens</th><th>Status</th><th>Bounce Reason</th><th>Type / Retry</th>
+      <th>Opens (Conf/Tot)</th><th>Clicks (Conf/Tot)</th><th>Status</th><th>Bounce Reason</th><th>Type / Retry</th>
     </tr></thead>
     <tbody>
     {% for row in outreach %}
     <tr data-email="{{ row.email }}" data-company="{{ row.company }}"
-        data-status="{{ 'bounced' if row.status == 'bounced' else ('opened' if row.opens_count and row.opens_count > 0 else 'sent') }}">
+        data-status="{% if row.status == 'bounced' %}{% if row.bounce_type == 'unknown' %}unknown{% else %}bounced{% endif %}{% elif row.clicks_count and row.clicks_count > 0 %}clicked{% elif row.opens_count and row.opens_count > 0 %}opened{% else %}sent{% endif %}">
       <td class="email-cell">{{ row.email }}</td>
       <td class="company-cell">{{ row.company or '—' }}</td>
       <td class="datetime-cell" data-utc="{{ row.sent_at or '' }}" style="color:var(--muted);font-size:.78rem;">{{ row.sent_at or '—' }}</td>
       <td class="datetime-cell" data-utc="{{ row.opened_at or '' }}" style="color:var(--muted);font-size:.78rem;">{{ row.opened_at or '—' }}</td>
+      
+      <!-- Opens (Conf/Tot) -->
       <td style="text-align:center;">
         {% if row.opens_count and row.opens_count > 0 %}
-          <span style="color:var(--blue);font-weight:700;">{{ row.opens_count }}</span>
+          {% set details_list = [] %}
+          {% if row.open_details %}
+            {% for x in row.open_details.split(',') %}
+              {% set p = x.split('|') %}
+              {% if p | length >= 2 %}
+                {% set dt = p[0] %}
+                {% set bot = p[1] | int %}
+                {% set label = 'Bot' if bot else 'Human' %}
+                {% set dummy = details_list.append(dt ~ ' (' ~ label ~ ')') %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          <span style="color:var(--blue);font-weight:700;cursor:help;" title="{{ details_list | join('\n') }}">{{ row.opens_confirmed_count }} / {{ row.opens_count }}</span>
         {% else %}—{% endif %}
       </td>
+
+      <!-- Clicks (Conf/Tot) -->
+      <td style="text-align:center;">
+        {% if row.clicks_count and row.clicks_count > 0 %}
+          {% set c_details_list = [] %}
+          {% if row.click_details %}
+            {% for x in row.click_details.split(',') %}
+              {% set p = x.split('|') %}
+              {% if p | length >= 2 %}
+                {% set dt = p[0] %}
+                {% set bot = p[1] | int %}
+                {% set label = 'Bot' if bot else 'Human' %}
+                {% set dummy = c_details_list.append(dt ~ ' (' ~ label ~ ')') %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          <span style="color:var(--accent2);font-weight:700;cursor:help;" title="{{ c_details_list | join('\n') }}">{{ row.clicks_confirmed_count }} / {{ row.clicks_count }}</span>
+        {% else %}—{% endif %}
+      </td>
+
+      <!-- Status -->
       <td>
-        {% if row.status == 'bounced' %}<span class="pill pill-bounced">⚠ Bounced</span>
-        {% elif row.opens_count and row.opens_count > 0 %}<span class="pill pill-opened">👁 Opened</span>
+        {% if row.status == 'bounced' %}
+          {% if row.bounce_type == 'hard' %}<span class="pill pill-bounced">⚠ Hard Bounce</span>
+          {% elif row.bounce_type == 'soft' %}<span class="pill pill-bounced" style="background:rgba(234,179,8,.15);color:var(--yellow);">⚠ Soft Bounce</span>
+          {% else %}<span class="pill pill-bounced" style="background:rgba(100,116,139,.15);color:var(--muted);">❔ Unknown Bounce</span>{% endif %}
+        {% elif row.clicks_count and row.clicks_count > 0 %}<span class="pill pill-clicked">🔗 Clicked</span>
+        {% elif row.opens_count and row.opens_count > 0 %}
+          {% if row.opens_confirmed_count > 0 %}<span class="pill pill-opened">👁 Opened</span>
+          {% else %}<span class="pill pill-bot" style="background:rgba(249,115,22,.15);color:var(--orange);">👁 Bot Open</span>{% endif %}
         {% else %}<span class="pill pill-sent">✉ Sent</span>{% endif %}
       </td>
       <td class="bounce-reason" title="{{ row.bounce_reason or '' }}">
@@ -340,9 +478,11 @@ document.addEventListener("DOMContentLoaded", function() {
         {% if row.status == 'bounced' %}
           {% if row.bounce_type == 'soft' %}
             <span class="pill pill-soft">Soft</span>
-            {% if row.retry_after %}&nbsp;<span class="pill pill-retry">↺ {{ row.retry_after }}</span>{% endif %}
-          {% else %}
+            {% if row.retry_after %}&nbsp;<span class="pill pill-retry" title="{{ row.retry_after }}">↺ Details</span>{% endif %}
+          {% elif row.bounce_type == 'hard' %}
             <span class="pill pill-hard">Hard · Denied</span>
+          {% else %}
+            <span class="pill pill-unknown">Unknown</span>
           {% endif %}
         {% else %}—{% endif %}
       </td>
@@ -354,6 +494,11 @@ document.addEventListener("DOMContentLoaded", function() {
   <div class="empty">No emails tracked yet. Start your outreach campaign!</div>
   {% endif %}
 </div>
+
+<div style="margin-top:2rem;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;font-size:.8rem;color:var(--muted);line-height:1.5;">
+  <h3 style="color:var(--text);font-size:.875rem;font-weight:600;margin-bottom:.5rem;">⚠️ Important Notice: Accuracy of Open & Click Tracking</h3>
+  <p style="margin-bottom:.5rem;">No tracking system can offer 100% accuracy. Security policies (like Apple Mail Privacy Protection) preload remote images automatically, showing false positive opens. Corporate email gateways and security scanners also pre-fetch links, which can trigger automatic clicks. We filter suspected bot activity (based on timing and user-agents), but tracking metrics should be interpreted as best-effort estimates rather than absolute guarantees of human engagement.</p>
+</div>
 </body>
 </html>"""
 
@@ -361,30 +506,52 @@ document.addEventListener("DOMContentLoaded", function() {
 @app.route("/stats")
 def stats():
     with get_db() as conn:
-        total_sent   = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
-        total_opens  = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
+        total_sent = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
+        
+        # Opens
+        total_opens = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
         unique_opens = conn.execute("SELECT COUNT(DISTINCT email) FROM opens").fetchone()[0]
-        hard_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type!='soft'").fetchone()[0]
+        unique_confirmed_opens = conn.execute("SELECT COUNT(DISTINCT email) FROM opens WHERE is_bot=0").fetchone()[0]
+        
+        # Clicks
+        total_clicks = conn.execute("SELECT COUNT(*) FROM clicks").fetchone()[0]
+        unique_clicks = conn.execute("SELECT COUNT(DISTINCT email) FROM clicks").fetchone()[0]
+        unique_confirmed_clicks = conn.execute("SELECT COUNT(DISTINCT email) FROM clicks WHERE is_bot=0").fetchone()[0]
+
+        # Bounces
+        hard_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='hard'").fetchone()[0]
         soft_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='soft'").fetchone()[0]
-        outreach     = conn.execute("""
+        unknown_bounces = conn.execute("SELECT COUNT(*) FROM sends WHERE status='bounced' AND bounce_type='unknown'").fetchone()[0]
+        
+        outreach = conn.execute("""
             SELECT s.email, s.company, s.sent_at, s.status,
                    s.bounce_reason, s.bounce_type, s.retry_after,
                    (SELECT COUNT(*) FROM opens o WHERE o.email=s.email) as opens_count,
-                   (SELECT MAX(opened_at) FROM opens o WHERE o.email=s.email) as opened_at
+                   (SELECT COUNT(*) FROM opens o WHERE o.email=s.email AND o.is_bot=0) as opens_confirmed_count,
+                   (SELECT MAX(opened_at) FROM opens o WHERE o.email=s.email) as opened_at,
+                   (SELECT group_concat(opened_at || '|' || is_bot, ',') FROM opens o WHERE o.email=s.email) as open_details,
+                   (SELECT COUNT(*) FROM clicks c WHERE c.email=s.email) as clicks_count,
+                   (SELECT COUNT(*) FROM clicks c WHERE c.email=s.email AND c.is_bot=0) as clicks_confirmed_count,
+                   (SELECT group_concat(clicked_at || '|' || is_bot, ',') FROM clicks c WHERE c.email=s.email) as click_details
             FROM sends s ORDER BY s.sent_at DESC
         """).fetchall()
-    open_rate   = round((unique_opens / max(total_sent,1)) * 100) if total_sent else 0
-    bounce_rate = round(((hard_bounces + soft_bounces) / max(total_sent,1)) * 100) if total_sent else 0
+        
+    open_rate = round((unique_opens / max(total_sent, 1)) * 100) if total_sent else 0
+    confirmed_open_rate = round((unique_confirmed_opens / max(total_sent, 1)) * 100) if total_sent else 0
+    bounce_rate = round(((hard_bounces + soft_bounces + unknown_bounces) / max(total_sent, 1)) * 100) if total_sent else 0
+    
     return render_template_string(DASHBOARD,
         total_sent=total_sent, total_opens=total_opens, unique_opens=unique_opens,
-        hard_bounces=hard_bounces, soft_bounces=soft_bounces, bounce_rate=bounce_rate,
-        open_rate=open_rate, outreach=outreach)
+        unique_confirmed_opens=unique_confirmed_opens, confirmed_open_rate=confirmed_open_rate,
+        total_clicks=total_clicks, unique_clicks=unique_clicks, unique_confirmed_clicks=unique_confirmed_clicks,
+        hard_bounces=hard_bounces, soft_bounces=soft_bounces, unknown_bounces=unknown_bounces,
+        bounce_rate=bounce_rate, open_rate=open_rate, outreach=outreach)
 
 
 @app.route("/api/stats")
 def api_stats():
     with get_db() as conn:
-        rows = conn.execute("SELECT email, company, opened_at, ip, user_agent FROM opens ORDER BY opened_at DESC").fetchall()
+        rows = conn.execute("SELECT email, company, opened_at, ip, user_agent, is_bot FROM opens ORDER BY opened_at DESC").fetchall()
     return jsonify([dict(r) for r in rows])
 
 
