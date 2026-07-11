@@ -403,27 +403,32 @@ def sync_tracker_from_logs(cfg: dict):
         except Exception:
             pass
 
+    # Exclude any false opens for bounced emails from the local backup
+    bounced_emails_set = {b["email"].lower() for b in failed}
+    local_opens = [o for o in local_opens if o["email"].lower() not in bounced_emails_set]
+
     # 1. Download current opens from Render to back them up locally
     try:
         req = urllib.request.Request(f"{tracker_url}/api/stats", method="GET")
         with urllib.request.urlopen(req, timeout=10) as resp:
             server_opens = _json.loads(resp.read())
         
-        # Merge server opens into local backup (deduplicate by (email, opened_at))
+        # Merge server opens into local backup (deduplicate by (email, opened_at)), skipping bounces
         local_keys = {(o["email"], o["opened_at"]) for o in local_opens}
         added_new = False
         for o in server_opens:
+            if o["email"].lower() in bounced_emails_set:
+                continue  # Skip false opens on bounced emails
             key = (o["email"], o["opened_at"])
             if key not in local_keys:
                 local_opens.append(o)
                 local_keys.add(key)
                 added_new = True
         
-        if added_new:
-            # Sort by opened_at descending
-            local_opens.sort(key=lambda x: x.get("opened_at", ""), reverse=True)
-            with open(opens_path, "w") as f:
-                _json.dump(local_opens, f, indent=2)
+        # Always write the clean opens list to the local backup
+        local_opens.sort(key=lambda x: x.get("opened_at", ""), reverse=True)
+        with open(opens_path, "w") as f:
+            _json.dump(local_opens, f, indent=2)
     except Exception as err:
         print(f"  Warning: Could not fetch opens backup from server: {err}")
 
