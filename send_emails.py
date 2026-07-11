@@ -56,7 +56,7 @@ CONFIG = {
     "db_path":       "turso-full.db",
     "template_path": "template.txt",
     "log_path":      "sent_log.json",
-    "daily_limit":   50,
+    "daily_limit":   60,
     "tracker_url":   _os.environ.get("TRACKER_URL", ""),
 }
 
