@@ -74,6 +74,9 @@ def init_db():
             conn.execute("ALTER TABLE opens ADD COLUMN is_bot INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        
+        # Clean up fake bounces from local code compilation crashes
+        conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%name %msg% is not defined%'")
         conn.commit()
 
 # ── Keep-alive ping ───────────────────────────────────────────────────────────
