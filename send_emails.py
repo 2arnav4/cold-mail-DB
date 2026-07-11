@@ -56,7 +56,7 @@ CONFIG = {
     "db_path":       "turso-full.db",
     "template_path": "template.txt",
     "log_path":      "sent_log.json",
-    "daily_limit":   20,
+    "daily_limit":   30,
     "tracker_url":   _os.environ.get("TRACKER_URL", ""),
 }
 
@@ -654,7 +654,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
 
         status, messages = mail.search(
             None,
-            '(FROM "mailer-daemon@googlemail.com" SUBJECT "Delivery Status Notification")'
+            '(OR FROM "mailer-daemon" FROM "postmaster")'
         )
         if status != "OK" or not messages[0].split():
             print("  No bounce notification messages found.")
@@ -663,6 +663,10 @@ def check_and_sync_bounces(cfg: dict) -> list:
 
         message_ids = messages[0].split()
         print(f"  Scanning {len(message_ids)} bounce notification emails...")
+
+        # Load sent log so we can do fallback matches
+        log = load_log(cfg["log_path"])
+        sent_emails_set = set(log.get("sent", []))
 
         for msg_id in message_ids[-50:]:
             res, msg_data = mail.fetch(msg_id, "(RFC822)")
@@ -680,16 +684,30 @@ def check_and_sync_bounces(cfg: dict) -> list:
 
                 body_lower = body.lower()
 
-                # Extract bounced address
+                # Extract bounced address using specific patterns
                 matches = re.findall(
-                    r"(?:Failed recipient|To|Final-Recipient.*?rfc822|Your message wasn't delivered to)\s*[:\;]?\s*\<?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\>?",
+                    r"(?:Failed recipient|Final-Recipient.*?rfc822|Your message wasn't delivered to)\s*[:\;]?\s*\<?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\>?",
                     body, re.IGNORECASE
                 )
+
+                # Extract To: header which might have a display name
+                to_matches = re.findall(
+                    r"To:\s*(?:[^<\n]*?)\<?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\>?",
+                    body, re.IGNORECASE
+                )
+                matches.extend(to_matches)
+
+                # Fallback: Scan the entire body for any email that exists in our sent log
+                all_emails_in_body = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", body)
+                for email_found in all_emails_in_body:
+                    email_found_lower = email_found.lower()
+                    if email_found_lower != email_addr.lower() and email_found_lower in sent_emails_set:
+                        matches.append(email_found_lower)
 
                 for m in matches:
                     if m.lower() == email_addr.lower():
                         continue
-                    if any(r["email"] == m for r in bounced_records):
+                    if any(r["email"].lower() == m.lower() for r in bounced_records):
                         continue
 
                     # Classify bounce type
