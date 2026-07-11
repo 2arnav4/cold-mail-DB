@@ -210,6 +210,10 @@ def bulk_sync():
                         o.get("is_bot", 0),
                     ),
                 )
+            # Clean up fake bounces from local code compilation crashes
+            conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
+            # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
+            conn.execute("DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')")
             conn.commit()
         return jsonify(
             {
