@@ -81,7 +81,7 @@ def init_db():
         conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
         # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
         conn.execute(
-            "DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')"
+            "DELETE FROM opens WHERE LOWER(email) IN (SELECT LOWER(email) FROM sends WHERE status='bounced')"
         )
         conn.commit()
 
@@ -213,7 +213,7 @@ def bulk_sync():
             # Clean up fake bounces from local code compilation crashes
             conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
             # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
-            conn.execute("DELETE FROM opens WHERE email IN (SELECT email FROM sends WHERE status='bounced')")
+            conn.execute("DELETE FROM opens WHERE LOWER(email) IN (SELECT LOWER(email) FROM sends WHERE status='bounced')")
             conn.commit()
         return jsonify(
             {
