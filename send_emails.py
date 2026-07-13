@@ -33,6 +33,7 @@ from email import encoders
 # ─────────────────────────────────────────────
 import os as _os
 
+
 def _load_env(path=".env"):
     """Parse a .env file and inject into os.environ (no dependencies needed)."""
     try:
@@ -46,18 +47,19 @@ def _load_env(path=".env"):
     except FileNotFoundError:
         pass  # .env is optional; fall back to real env vars
 
+
 _load_env()
 
 CONFIG = {
-    "your_email":    _os.environ.get("GMAIL_ADDRESS",      ""),
-    "app_password":  _os.environ.get("GMAIL_APP_PASSWORD", ""),
-    "your_name":     "Arnav Singla",
-    "resume_path":   "ARNAV-RESUME.pdf",
-    "db_path":       "turso-full.db",
+    "your_email": _os.environ.get("GMAIL_ADDRESS", ""),
+    "app_password": _os.environ.get("GMAIL_APP_PASSWORD", ""),
+    "your_name": "Arnav Singla",
+    "resume_path": "ARNAV-RESUME.pdf",
+    "db_path": "turso-full.db",
     "template_path": "template.txt",
-    "log_path":      "sent_log.json",
-    "daily_limit":   60,
-    "tracker_url":   _os.environ.get("TRACKER_URL", ""),
+    "log_path": "sent_log.json",
+    "daily_limit": 100,
+    "tracker_url": _os.environ.get("TRACKER_URL", ""),
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,7 +82,7 @@ Resources:
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
 • Pulse (Live): https://pulse-nu-liard.vercel.app
-• Pulse (Code): https://github.com/2arnav4/Pulse"""
+• Pulse (Code): https://github.com/2arnav4/Pulse""",
     },
     "vimal@kalam.in": {
         "subject": "Internship Opportunity – SuperKalam",
@@ -95,7 +97,7 @@ Resources:
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
 • Student Helper (Live): https://student-helper-yaye.vercel.app
-• Student Helper (Code): https://github.com/2arnav4/Student-Helper"""
+• Student Helper (Code): https://github.com/2arnav4/Student-Helper""",
     },
     "rajiv@opoyi.com": {
         "subject": "Internship Opportunity – Opoyi",
@@ -109,7 +111,7 @@ Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Pulse (Live): https://pulse-nu-liard.vercel.app"""
+• Pulse (Live): https://pulse-nu-liard.vercel.app""",
     },
     "nitish@paasa.co": {
         "subject": "Internship Opportunity – Paasa",
@@ -124,7 +126,7 @@ Resources:
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
 • Lucent FinTech (Live): https://lucent-fintech-psi.vercel.app
-• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech"""
+• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech""",
     },
     "gaurav@trytejas.ai": {
         "subject": "Internship Opportunity – Tejas AI",
@@ -139,7 +141,7 @@ Resources:
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
 • Lucent FinTech (Live): https://lucent-fintech-psi.vercel.app
-• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech"""
+• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech""",
     },
     "fyoraaipvtltd@gmail.com": {
         "subject": "Internship Opportunity – Fyora AI",
@@ -153,7 +155,7 @@ Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
 • LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Pulse (Live): https://pulse-nu-liard.vercel.app"""
+• Pulse (Live): https://pulse-nu-liard.vercel.app""",
     },
     "careers@uipath.com": {
         "subject": "Internship Opportunity – UiPath",
@@ -166,7 +168,7 @@ Scalable automation that handles real-world complexity requires clean architectu
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@kenko.health": {
         "subject": "Internship Opportunity – Kenko Health",
@@ -179,7 +181,7 @@ I understand the importance of building products where users need to trust every
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@pitchline.com": {
         "subject": "Internship Opportunity – Pitchline",
@@ -192,7 +194,7 @@ I built Pulse, which handles 3K+ tasks across teams and integrates Groq AI for r
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@dpdzero.com": {
         "subject": "Internship Opportunity – DPDZero",
@@ -205,7 +207,7 @@ I built Lucent FinTech - a finance dashboard tracking 200+ stocks in real time v
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@carboncrunch.com": {
         "subject": "Internship Opportunity – Carbon Crunch",
@@ -218,7 +220,7 @@ I built Pulse - a collaboration platform with real-time data management and resp
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@reducate.ai": {
         "subject": "Internship Opportunity – Reducate.ai",
@@ -231,7 +233,7 @@ I built Student Helper - a MERN platform serving 150+ students with notes sharin
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@solvusai.com": {
         "subject": "Internship Opportunity – SolvusAI",
@@ -244,7 +246,7 @@ I built Pulse, which handles 3K+ tasks across teams and integrates Groq AI for i
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@biztel.ai": {
         "subject": "Internship Opportunity – Biztel.AI",
@@ -257,7 +259,7 @@ I built Pulse - a platform managing 3K+ tasks across teams with AI-generated sta
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@hunchbite.com": {
         "subject": "Internship Opportunity – Hunchbite",
@@ -270,7 +272,7 @@ I'd love to contribute to Hunchbite's studio and grow fast by shipping real prod
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
     "careers@softsensor.ai": {
         "subject": "Internship Opportunity – SoftSensor AI",
@@ -283,7 +285,7 @@ I built Lucent FinTech, which tracks 200+ stocks and crypto assets in real time 
 Resources:
 • Portfolio: https://arnav24.tech
 • GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3"""
+• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
     },
 }
 
@@ -346,15 +348,18 @@ def load_failed_log(log_path: str) -> list:
 def record_failed(log_path: str, contact: dict, error: str):
     """Append a failed send to failed_log.json."""
     from datetime import datetime
+
     failed_path = log_path.replace(".json", "_failed.json")
     failed = load_failed_log(log_path)
-    failed.append({
-        "email":   contact["contact_email"],
-        "name":    contact.get("contact_name") or "",
-        "company": contact.get("company_name") or "",
-        "error":   str(error),
-        "time":    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    })
+    failed.append(
+        {
+            "email": contact["contact_email"],
+            "name": contact.get("contact_name") or "",
+            "company": contact.get("company_name") or "",
+            "error": str(error),
+            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
     with open(failed_path, "w") as f:
         json.dump(failed, f, indent=2)
 
@@ -371,12 +376,13 @@ def sent_today(log: dict) -> int:
 def record_sent(log: dict, email: str, company: str = ""):
     """Record a successful send — email list, daily count, and per-email details."""
     from datetime import datetime
+
     today = str(date.today())
     log["sent"].append(email)
     log["daily"][today] = log["daily"].get(today, 0) + 1
     log["details"][email] = {
         "company": company,
-        "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
@@ -390,7 +396,7 @@ def sync_tracker_from_logs(cfg: dict):
 
     import urllib.request, json as _json
 
-    log    = load_log(cfg["log_path"])
+    log = load_log(cfg["log_path"])
     failed = load_failed_log(cfg["log_path"])
 
     # Load local opens backup
@@ -405,14 +411,16 @@ def sync_tracker_from_logs(cfg: dict):
 
     # Exclude any false opens for bounced emails from the local backup
     bounced_emails_set = {b["email"].lower() for b in failed}
-    local_opens = [o for o in local_opens if o["email"].lower() not in bounced_emails_set]
+    local_opens = [
+        o for o in local_opens if o["email"].lower() not in bounced_emails_set
+    ]
 
     # 1. Download current opens from Render to back them up locally
     try:
         req = urllib.request.Request(f"{tracker_url}/api/stats", method="GET")
         with urllib.request.urlopen(req, timeout=10) as resp:
             server_opens = _json.loads(resp.read())
-        
+
         # Merge server opens into local backup (deduplicate by (email, opened_at)), skipping bounces
         local_keys = {(o["email"], o["opened_at"]) for o in local_opens}
         added_new = False
@@ -424,7 +432,7 @@ def sync_tracker_from_logs(cfg: dict):
                 local_opens.append(o)
                 local_keys.add(key)
                 added_new = True
-        
+
         # Always write the clean opens list to the local backup
         local_opens.sort(key=lambda x: x.get("opened_at", ""), reverse=True)
         with open(opens_path, "w") as f:
@@ -434,7 +442,11 @@ def sync_tracker_from_logs(cfg: dict):
 
     # Build sends payload from the details dict (has company + sent_at)
     sends = [
-        {"email": email, "company": info.get("company", ""), "sent_at": info.get("sent_at", "")}
+        {
+            "email": email,
+            "company": info.get("company", ""),
+            "sent_at": info.get("sent_at", ""),
+        }
         for email, info in log.get("details", {}).items()
     ]
     # Fall back: emails in sent[] with no details entry get a bare record
@@ -444,22 +456,30 @@ def sync_tracker_from_logs(cfg: dict):
             sends.append({"email": email, "company": "", "sent_at": ""})
 
     bounces = [
-        {"email": b["email"], "company": b.get("company", ""),
-         "reason": b.get("error", "Bounce — invalid address"), "sent_at": b.get("time", "")}
+        {
+            "email": b["email"],
+            "company": b.get("company", ""),
+            "reason": b.get("error", "Bounce — invalid address"),
+            "sent_at": b.get("time", ""),
+        }
         for b in failed
     ]
 
     try:
-        payload = _json.dumps({"sends": sends, "bounces": bounces, "opens": local_opens}).encode()
+        payload = _json.dumps(
+            {"sends": sends, "bounces": bounces, "opens": local_opens}
+        ).encode()
         req = urllib.request.Request(
             f"{tracker_url}/api/bulk_sync",
             data=payload,
             headers={"Content-Type": "application/json"},
-            method="POST"
+            method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = _json.loads(resp.read())
-        print(f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces, {result.get('synced_opens', 0)} opens")
+        print(
+            f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces, {result.get('synced_opens', 0)} opens"
+        )
     except Exception as e:
         print(f"  Tracker sync warning: {e}")
 
@@ -480,7 +500,7 @@ def load_template(template_path: str) -> tuple:
 
     for i, line in enumerate(lines):
         if line.lower().startswith("subject:"):
-            subject = line[len("subject:"):].strip()
+            subject = line[len("subject:") :].strip()
             body_start = i + 1
             break
 
@@ -496,19 +516,21 @@ def render(template: str, contact: dict) -> str:
     """Replace {{placeholders}} with contact data."""
     result = template
     replacements = {
-        "{{contact_name}}":   contact.get("contact_name") or "there",
-        "{{first_name}}":     (contact.get("contact_name") or "there").split()[0],
-        "{{company}}":        contact.get("company_name") or "",
+        "{{contact_name}}": contact.get("contact_name") or "there",
+        "{{first_name}}": (contact.get("contact_name") or "there").split()[0],
+        "{{company}}": contact.get("company_name") or "",
         "{{company_domain}}": contact.get("company_domain") or "",
-        "{{role}}":           contact.get("contact_role") or "",
-        "{{industry}}":       contact.get("company_industry") or "",
-        "{{funding_stage}}":  contact.get("funding_stage") or "",
+        "{{role}}": contact.get("contact_role") or "",
+        "{{industry}}": contact.get("company_industry") or "",
+        "{{funding_stage}}": contact.get("funding_stage") or "",
     }
     for placeholder, value in replacements.items():
         result = result.replace(placeholder, value)
     return result
 
+
 import re
+
 
 def text_to_html(text: str, pixel_tag: str = "") -> str:
     """Convert plain text email body to clean HTML with clickable links."""
@@ -519,16 +541,12 @@ def text_to_html(text: str, pixel_tag: str = "") -> str:
 
     # 1. Parse markdown links [Link Text](URL)
     escaped = re.sub(
-        r'\[([^\]]+)\]\((https?://[^)]+)\)',
-        r'<a href="\2">\1</a>',
-        escaped
+        r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', escaped
     )
 
     # 2. Auto-link remaining raw https:// and http:// URLs (ignoring already linked ones)
     escaped = re.sub(
-        r'(?<!href=")(?<!">)(https?://[^\s<>"]+)',
-        r'<a href="\1">\1</a>',
-        escaped
+        r'(?<!href=")(?<!">)(https?://[^\s<>"]+)', r'<a href="\1">\1</a>', escaped
     )
 
     # Convert newlines to <br> and wrap in clean HTML
@@ -542,12 +560,15 @@ def text_to_html(text: str, pixel_tag: str = "") -> str:
 </body>
 </html>"""
 
+
 def wrap_links(text, email, company, tracker_url):
     if not tracker_url:
         return text
     import re
     import base64
+
     tracker_clean = tracker_url.rstrip("/")
+
     def replace_url(match):
         url = match.group(1)
         if tracker_clean in url:
@@ -555,8 +576,8 @@ def wrap_links(text, email, company, tracker_url):
         payload = f"{email}|{company}|{url}"
         encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
         return f"{tracker_clean}/c/{encoded}"
-    
-    url_pattern = r'(https?://[a-zA-Z0-9.\-_~!$&\'()*+,;=:@/%?#]+)'
+
+    url_pattern = r"(https?://[a-zA-Z0-9.\-_~!$&\'()*+,;=:@/%?#]+)"
     return re.sub(url_pattern, replace_url, text)
 
 
@@ -565,24 +586,25 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     personalized = PERSONALIZED_EMAILS.get(contact["contact_email"])
     if personalized:
         final_subject = personalized["subject"]
-        final_body    = personalized["body"]
+        final_body = personalized["body"]
     else:
         final_subject = render(subject, contact)
-        final_body    = render(body, contact)
+        final_body = render(body, contact)
 
     # Build tracking pixel tag if TRACKER_URL is configured
     tracker_url = cfg.get("tracker_url", "").rstrip("/")
     pixel_tag = ""
     if tracker_url:
         import base64 as _b64
-        payload  = f"{contact['contact_email']}|{contact.get('company_name', '')}"
-        encoded  = _b64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+
+        payload = f"{contact['contact_email']}|{contact.get('company_name', '')}"
+        encoded = _b64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
         pixel_tag = f'<img src="{tracker_url}/t/{encoded}.gif" width="1" height="1" style="display:none;" />'
 
     # Send as multipart/alternative (plain text + HTML) so links are clickable
     msg = MIMEMultipart("mixed")  # outer container (holds alternative + attachment)
-    msg["From"]    = f"{cfg['your_name']} <{cfg['your_email']}>"
-    msg["To"]      = contact["contact_email"]
+    msg["From"] = f"{cfg['your_name']} <{cfg['your_email']}>"
+    msg["To"] = contact["contact_email"]
     msg["Subject"] = final_subject
 
     # Inner multipart/alternative for plain + HTML
@@ -602,7 +624,9 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
         part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
         msg.attach(part)
     else:
-        print(f"  WARNING: Resume not found at '{resume_path}' — sending without attachment")
+        print(
+            f"  WARNING: Resume not found at '{resume_path}' — sending without attachment"
+        )
 
     return msg
 
@@ -619,7 +643,7 @@ def fetch_contacts(db_path: str) -> list:
 
 def print_summary(sent: list, skipped: int, remaining_today: int, dry_run: bool):
     mode = "[DRY RUN] " if dry_run else ""
-    print(f"\n{'─'*50}")
+    print(f"\n{'─' * 50}")
     print(f"  {mode}Done!")
     print(f"  Emails sent this run : {len(sent)}")
     print(f"  Skipped (already sent): {skipped}")
@@ -628,7 +652,7 @@ def print_summary(sent: list, skipped: int, remaining_today: int, dry_run: bool)
         print(f"\n  Sent to:")
         for s in sent:
             print(f"    - {s['contact_email']}  ({s['company_name']})")
-    print(f"{'─'*50}\n")
+    print(f"{'─' * 50}\n")
 
 
 def check_and_sync_bounces(cfg: dict) -> list:
@@ -642,8 +666,8 @@ def check_and_sync_bounces(cfg: dict) -> list:
     from datetime import datetime
 
     print("Checking Gmail for new bounces via IMAP...")
-    email_addr  = cfg["your_email"]
-    app_pwd     = cfg["app_password"].replace(" ", "")
+    email_addr = cfg["your_email"]
+    app_pwd = cfg["app_password"].replace(" ", "")
     tracker_url = cfg.get("tracker_url", "").rstrip("/")
 
     # Persisted UID state
@@ -657,7 +681,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
         except Exception:
             pass
 
-    bounced_records = []   # list of {email, reason, bounce_type, retry_after}
+    bounced_records = []  # list of {email, reason, bounce_type, retry_after}
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -665,7 +689,11 @@ def check_and_sync_bounces(cfg: dict) -> list:
         mail.select("INBOX")
 
         # Search for messages since last processed UID
-        status, messages = mail.uid('search', None, f'(OR FROM "mailer-daemon" FROM "postmaster") UID {last_uid+1}:*')
+        status, messages = mail.uid(
+            "search",
+            None,
+            f'(OR FROM "mailer-daemon" FROM "postmaster") UID {last_uid + 1}:*',
+        )
         if status != "OK" or not messages[0].split():
             print("  No new bounce notification messages found.")
             mail.logout()
@@ -680,12 +708,12 @@ def check_and_sync_bounces(cfg: dict) -> list:
             if msg_uid > max_uid:
                 max_uid = msg_uid
 
-            res, msg_data = mail.uid('fetch', uid_bytes, "(RFC822)")
+            res, msg_data = mail.uid("fetch", uid_bytes, "(RFC822)")
             for response_part in msg_data:
                 if not isinstance(response_part, tuple):
                     continue
                 original_msg = _email.message_from_bytes(response_part[1])
-                
+
                 # Check for standard message/delivery-status DSN part
                 dsn_part = None
                 for part in original_msg.walk():
@@ -707,7 +735,11 @@ def check_and_sync_bounces(cfg: dict) -> list:
                                 if sub_msg.get("Final-Recipient"):
                                     fr = sub_msg.get("Final-Recipient")
                                     parts = fr.split(";", 1)
-                                    bounced_email = parts[1].strip() if len(parts) > 1 else parts[0].strip()
+                                    bounced_email = (
+                                        parts[1].strip()
+                                        if len(parts) > 1
+                                        else parts[0].strip()
+                                    )
                                     bounce_status = sub_msg.get("Status")
                                     bounce_action = sub_msg.get("Action")
                                     diagnostic_code = sub_msg.get("Diagnostic-Code")
@@ -720,7 +752,11 @@ def check_and_sync_bounces(cfg: dict) -> list:
                                 if sub_msg.get("Final-Recipient"):
                                     fr = sub_msg.get("Final-Recipient")
                                     parts = fr.split(";", 1)
-                                    bounced_email = parts[1].strip() if len(parts) > 1 else parts[0].strip()
+                                    bounced_email = (
+                                        parts[1].strip()
+                                        if len(parts) > 1
+                                        else parts[0].strip()
+                                    )
                                     bounce_status = sub_msg.get("Status")
                                     bounce_action = sub_msg.get("Action")
                                     diagnostic_code = sub_msg.get("Diagnostic-Code")
@@ -734,13 +770,18 @@ def check_and_sync_bounces(cfg: dict) -> list:
                     if original_msg.is_multipart():
                         for part in original_msg.walk():
                             if part.get_content_type() == "text/plain":
-                                body += part.get_payload(decode=True).decode(errors="ignore")
+                                body += part.get_payload(decode=True).decode(
+                                    errors="ignore"
+                                )
                     else:
-                        body = original_msg.get_payload(decode=True).decode(errors="ignore")
-                    
+                        body = original_msg.get_payload(decode=True).decode(
+                            errors="ignore"
+                        )
+
                     to_matches = re.findall(
                         r"To:\s*(?:[^<\n]*?)\<?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\>?",
-                        body, re.IGNORECASE
+                        body,
+                        re.IGNORECASE,
                     )
                     if to_matches:
                         for m in to_matches:
@@ -773,19 +814,23 @@ def check_and_sync_bounces(cfg: dict) -> list:
                     if diagnostic_code:
                         diag_clean = diagnostic_code.strip()
                         parts = diag_clean.split(";", 1)
-                        reason = parts[1].strip() if len(parts) > 1 else parts[0].strip()
+                        reason = (
+                            parts[1].strip() if len(parts) > 1 else parts[0].strip()
+                        )
 
                     # Classify retry_after
                     retry_after = ""
                     if bounce_type == "soft":
                         retry_after = "Temporary failure — Gmail will retry automatically for up to ~4 days before giving up"
-                    
-                    bounced_records.append({
-                        "email":       bounced_email,
-                        "reason":      reason,
-                        "bounce_type": bounce_type,
-                        "retry_after": retry_after,
-                    })
+
+                    bounced_records.append(
+                        {
+                            "email": bounced_email,
+                            "reason": reason,
+                            "bounce_type": bounce_type,
+                            "retry_after": retry_after,
+                        }
+                    )
 
         mail.close()
         mail.logout()
@@ -810,9 +855,11 @@ def check_and_sync_bounces(cfg: dict) -> list:
     hard = sum(1 for r in bounced_records if r["bounce_type"] == "hard")
     soft = sum(1 for r in bounced_records if r["bounce_type"] == "soft")
     unknown = sum(1 for r in bounced_records if r["bounce_type"] == "unknown")
-    print(f"  Detected {len(bounced_records)} bounces — {hard} hard, {soft} soft, {unknown} unknown: {bounced_emails}")
+    print(
+        f"  Detected {len(bounced_records)} bounces — {hard} hard, {soft} soft, {unknown} unknown: {bounced_emails}"
+    )
 
-    log    = load_log(cfg["log_path"])
+    log = load_log(cfg["log_path"])
     failed = load_failed_log(cfg["log_path"])
     existing_failed = {item["email"] for item in failed}
 
@@ -820,10 +867,10 @@ def check_and_sync_bounces(cfg: dict) -> list:
 
     for rec in bounced_records:
         email = rec["email"]
-        
+
         if email not in log["sent"]:
             log["sent"].append(email)
-            
+
             # Decrement daily quota for the actual send date
             sent_at = log.get("details", {}).get(email, {}).get("sent_at", "")
             sent_day = sent_at.split(" ")[0] if sent_at else None
@@ -831,28 +878,34 @@ def check_and_sync_bounces(cfg: dict) -> list:
                 log["daily"][sent_day] = max(0, log["daily"][sent_day] - 1)
 
         if email not in existing_failed:
-            failed.append({
-                "email":       email,
-                "name":        "",
-                "company":     log.get("details", {}).get(email, {}).get("company", ""),
-                "error":       rec["reason"],
-                "bounce_type": rec["bounce_type"],
-                "retry_after": rec["retry_after"],
-                "time":        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            })
+            failed.append(
+                {
+                    "email": email,
+                    "name": "",
+                    "company": log.get("details", {}).get(email, {}).get("company", ""),
+                    "error": rec["reason"],
+                    "bounce_type": rec["bounce_type"],
+                    "retry_after": rec["retry_after"],
+                    "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
             new_bounces_logged += 1
 
             if tracker_url:
                 try:
-                    payload = _json.dumps({
-                        "email":       email,
-                        "reason":      rec["reason"],
-                        "bounce_type": rec["bounce_type"],
-                        "retry_after": rec["retry_after"],
-                    }).encode("utf-8")
+                    payload = _json.dumps(
+                        {
+                            "email": email,
+                            "reason": rec["reason"],
+                            "bounce_type": rec["bounce_type"],
+                            "retry_after": rec["retry_after"],
+                        }
+                    ).encode("utf-8")
                     req = _urllib.Request(
-                        f"{tracker_url}/api/log_bounce", data=payload,
-                        headers={"Content-Type": "application/json"}, method="POST"
+                        f"{tracker_url}/api/log_bounce",
+                        data=payload,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
                     )
                     with _urllib.urlopen(req, timeout=8):
                         pass
@@ -868,15 +921,21 @@ def check_and_sync_bounces(cfg: dict) -> list:
     # Clean local SQLite database
     try:
         # Only remove hard bounces from DB — soft/unknown bounces may still be valid
-        hard_emails = [r["email"] for r in bounced_records if r["bounce_type"] == "hard"]
+        hard_emails = [
+            r["email"] for r in bounced_records if r["bounce_type"] == "hard"
+        ]
         if hard_emails:
             conn = sqlite3.connect(cfg["db_path"])
-            cur  = conn.cursor()
-            cur.executemany("DELETE FROM contacts WHERE email = ?", [(e,) for e in hard_emails])
+            cur = conn.cursor()
+            cur.executemany(
+                "DELETE FROM contacts WHERE email = ?", [(e,) for e in hard_emails]
+            )
             conn.commit()
             deleted_count = conn.total_changes
             conn.close()
-            print(f"  Removed {deleted_count} hard-bounced contacts from local database.")
+            print(
+                f"  Removed {deleted_count} hard-bounced contacts from local database."
+            )
     except Exception as dbe:
         print(f"  Warning: Database cleanup failed: {dbe}")
 
@@ -884,18 +943,24 @@ def check_and_sync_bounces(cfg: dict) -> list:
     return bounced_emails
 
 
-
-
 def main():
     parser = argparse.ArgumentParser(description="Cold Mail Sender")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print emails without actually sending them")
-    parser.add_argument("--limit", type=int,
-                        help="Override daily limit for this run")
-    parser.add_argument("--show-queue", action="store_true",
-                        help="Show the next contacts that would be emailed and exit")
-    parser.add_argument("--check-bounces", action="store_true",
-                        help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print emails without actually sending them",
+    )
+    parser.add_argument("--limit", type=int, help="Override daily limit for this run")
+    parser.add_argument(
+        "--show-queue",
+        action="store_true",
+        help="Show the next contacts that would be emailed and exit",
+    )
+    parser.add_argument(
+        "--check-bounces",
+        action="store_true",
+        help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit",
+    )
     args = parser.parse_args()
     dry_run = args.dry_run
     cfg = CONFIG.copy()
@@ -930,7 +995,9 @@ def main():
         quota_left = min(quota_left, args.limit)
 
     print(f"\nCold Mail Sender")
-    print(f"  Today's quota: {already_sent_today}/{cfg['daily_limit']} used  ->  {quota_left} left")
+    print(
+        f"  Today's quota: {already_sent_today}/{cfg['daily_limit']} used  ->  {quota_left} left"
+    )
 
     if quota_left <= 0:
         print("  Daily limit already reached. Come back tomorrow!")
@@ -956,7 +1023,9 @@ def main():
     if args.show_queue:
         print(f"\n  Next {min(quota_left, 20)} in queue:")
         for c in queue[:20]:
-            print(f"    {c['contact_email']:40s} | {c['company_name']} | {c['contact_role']}")
+            print(
+                f"    {c['contact_email']:40s} | {c['company_name']} | {c['contact_role']}"
+            )
         sys.exit(0)
 
     # Take only what we're allowed today
@@ -978,15 +1047,17 @@ def main():
             print(f"  Gmail SMTP connected\n")
         except Exception as e:
             print(f"ERROR: Gmail login failed: {e}")
-            print("  Make sure you're using an App Password, not your regular password.")
+            print(
+                "  Make sure you're using an App Password, not your regular password."
+            )
             print("  Generate one at: https://myaccount.google.com/apppasswords")
             sys.exit(1)
 
     try:
         for i, contact in enumerate(batch, 1):
             email_addr = contact["contact_email"]
-            company    = contact["company_name"]
-            role       = contact["contact_role"] or "—"
+            company = contact["company_name"]
+            role = contact["contact_role"] or "—"
 
             print(f"  [{i:02d}/{len(batch)}] {email_addr:40s} | {company} | {role}")
 
@@ -994,17 +1065,19 @@ def main():
                 personalized = PERSONALIZED_EMAILS.get(email_addr)
                 if personalized:
                     subject = personalized["subject"]
-                    body    = personalized["body"]
+                    body = personalized["body"]
                     mode_tag = "[PERSONALIZED]"
                 else:
                     subject = render(subject_template, contact)
-                    body    = render(body_template, contact)
+                    body = render(body_template, contact)
                     mode_tag = "[GENERIC TEMPLATE]"
                 print(f"         {mode_tag}")
                 print(f"         Subject : {subject}")
                 print(f"         Body preview: {body[:120].strip()}...")
                 print()
-                sent_this_run.append(contact)  # track for summary display only, do NOT write to log
+                sent_this_run.append(
+                    contact
+                )  # track for summary display only, do NOT write to log
                 continue
 
             try:
@@ -1012,25 +1085,30 @@ def main():
                 smtp_conn.send_message(msg)
                 record_sent(log, email_addr, company)
                 sent_this_run.append(contact)
-                save_log(cfg["log_path"], log)   # Save after each send (safe against crashes)
-                
+                save_log(
+                    cfg["log_path"], log
+                )  # Save after each send (safe against crashes)
+
                 # Notify tracking server of successful send
                 tracker_url = cfg.get("tracker_url", "").rstrip("/")
                 if tracker_url:
                     try:
                         import urllib.request as _urllib
                         import json as _json
+
                         req = _urllib.Request(
                             f"{tracker_url}/api/log_send",
-                            data=_json.dumps({"email": email_addr, "company": company}).encode("utf-8"),
+                            data=_json.dumps(
+                                {"email": email_addr, "company": company}
+                            ).encode("utf-8"),
                             headers={"Content-Type": "application/json"},
-                            method="POST"
+                            method="POST",
                         )
                         with _urllib.urlopen(req, timeout=5) as resp:
                             pass
                     except Exception as te:
                         print(f"         Tracker API Log Warning: {te}")
-                
+
                 print(f"         SENT")
             except Exception as e:
                 print(f"         FAILED: {e}")
