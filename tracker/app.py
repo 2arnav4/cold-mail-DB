@@ -92,20 +92,69 @@ def ping():
     return jsonify({"status": "ok", "ts": datetime.utcnow().isoformat()}), 200
 
 
-KNOWN_PROXY_UA_SUBSTRINGS = [
-    "GoogleImageProxy",  # Gmail's image proxy — fetches once, caches on Google's side
+ALWAYS_BOT_UA_SUBSTRINGS = [
+    # Security-scanning / link-preview fetchers — automated, with no
+    # legitimate "this is a human reading the email" path at all.
     "Google-Safety",  # Google link/attachment scanning
     "MicrosoftPreview",  # Outlook/O365 link preview
     "OutlookSafeLinksScanner",
     "ATP-Scan",  # Microsoft Defender for Office 365 Safe Links
+    "SafeLinks",
+    # Corporate email-security gateways that prefetch links/images to scan them
+    "Proofpoint",
+    "Mimecast",
+    "URLProtect",  # Mimecast URL Protect
+    "Barracuda",
+    "MailScanner",
+    "Symantec",
+    "zscaler",
+    "trend micro",
+    "bitdefender",
+    "fireeye",
+    "checkpoint",
+    "forcepoint",
+    # Generic non-browser HTTP client libraries — a real mail client rendering
+    # an <img> tag never identifies itself this way, so seeing one of these
+    # fetch a tracking pixel/link is a strong bot/monitoring-tool signal
+    "curl/",
+    "wget/",
+    "python-requests",
+    "python-urllib",
+    "go-http-client",
+    "okhttp",
+    "libwww-perl",
+    "apache-httpclient",
+    "node-fetch",
+    "axios/",
+    "postmanruntime",
+    "java/",
 ]
+
+# NOT in the always-bot list on purpose: GoogleImageProxy/ggpht.com (Gmail &
+# Google Workspace) and YahooMailProxy route EVERY remote-image fetch through
+# their own proxy — both an automated security prescan done at delivery time
+# AND a real human actually opening the email in Gmail/Workspace come through
+# the identical proxy IP range and UA. There is no signature that tells the
+# two apart; only elapsed time does, so these fall through to the timing
+# check below instead of being flagged unconditionally.
 
 
 def classify_bot(user_agent: str, seconds_since_send: float) -> bool:
     ua = (user_agent or "").lower()
-    if any(sig.lower() in ua for sig in KNOWN_PROXY_UA_SUBSTRINGS):
+    if not ua:
+        # Real mail clients/browsers virtually always send a User-Agent when
+        # fetching a remote image or following a link; a blank one is far
+        # more consistent with an automated scanner than a human.
         return True
-    if seconds_since_send is not None and seconds_since_send < 10:
+    if any(sig.lower() in ua for sig in ALWAYS_BOT_UA_SUBSTRINGS):
+        return True
+    if seconds_since_send is not None and seconds_since_send < 45:
+        # Security gateways and privacy-preserving prefetchers (Apple Mail
+        # Privacy Protection, corporate ATP/URL-scanning) almost always fetch
+        # within seconds of delivery, well before a human has even seen the
+        # message land. A real read this fast is rare enough that treating it
+        # as a bot open trades a few false negatives for far fewer false
+        # positives on the "confirmed" numbers.
         return True
     return False
 
@@ -222,6 +271,65 @@ def bulk_sync():
                 "synced_opens": len(opens),
             }
         ), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Purge specific emails (e.g. rows synced in by mistake) ──────────────────
+@app.route("/api/purge", methods=["POST"])
+def purge():
+    data = request.get_json() or {}
+    emails = [e.lower() for e in data.get("emails", []) if e]
+    if not emails:
+        return jsonify({"error": "Missing emails"}), 400
+    try:
+        with get_db() as conn:
+            placeholders = ",".join("?" * len(emails))
+            for table in ("sends", "opens", "clicks"):
+                conn.execute(
+                    f"DELETE FROM {table} WHERE LOWER(email) IN ({placeholders})",
+                    emails,
+                )
+            conn.commit()
+        return jsonify({"purged": emails}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Recompute is_bot on already-stored rows using the current classify_bot
+#    logic (e.g. after a classifier change, so historical rows aren't stuck
+#    with a verdict made under the old rules) ─────────────────────────────────
+@app.route("/api/recompute_bot", methods=["POST"])
+def recompute_bot():
+    try:
+        changed = {"opens": 0, "clicks": 0}
+        with get_db() as conn:
+            sent_at_by_email = {
+                row["email"]: row["sent_at"]
+                for row in conn.execute("SELECT email, sent_at FROM sends").fetchall()
+            }
+            for table, ts_col in (("opens", "opened_at"), ("clicks", "clicked_at")):
+                rows = conn.execute(
+                    f"SELECT id, email, user_agent, {ts_col} as ts, is_bot FROM {table}"
+                ).fetchall()
+                for row in rows:
+                    sent_at = sent_at_by_email.get(row["email"])
+                    seconds_since_send = None
+                    if sent_at:
+                        try:
+                            sent_dt = datetime.strptime(sent_at, "%Y-%m-%d %H:%M:%S")
+                            ts_dt = datetime.strptime(row["ts"], "%Y-%m-%d %H:%M:%S")
+                            seconds_since_send = (ts_dt - sent_dt).total_seconds()
+                        except Exception:
+                            pass
+                    new_is_bot = 1 if classify_bot(row["user_agent"], seconds_since_send) else 0
+                    if new_is_bot != row["is_bot"]:
+                        conn.execute(
+                            f"UPDATE {table} SET is_bot=? WHERE id=?", (new_is_bot, row["id"])
+                        )
+                        changed[table] += 1
+            conn.commit()
+        return jsonify({"reclassified": changed}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
