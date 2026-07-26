@@ -222,6 +222,7 @@ def bulk_sync():
     data = request.get_json() or {}
     sends = data.get("sends", [])
     bounces = data.get("bounces", [])
+    skips = data.get("skips", [])
     opens = data.get("opens", [])
     try:
         with get_db() as conn:
@@ -242,8 +243,26 @@ def bulk_sync():
                         b.get("company", ""),
                         b.get("sent_at", ""),
                         b.get("reason", "Bounce — invalid address"),
-                        b.get("bounce_type", "hard"),
+                        # Unknown, not "hard" -- a missing bounce_type means we
+                        # genuinely don't know the type, not that it's severe.
+                        b.get("bounce_type", "unknown"),
                         b.get("retry_after", ""),
+                    ),
+                )
+            for sk in skips:
+                # Never actually sent -- caught by pre-send verification and
+                # held back. Distinct from a real bounce: nothing was attempted.
+                conn.execute(
+                    "INSERT INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
+                    "VALUES (?, ?, ?, 'skipped', ?, '', '') "
+                    "ON CONFLICT(email) DO UPDATE SET "
+                    "status=CASE WHEN sends.status='sent' THEN sends.status ELSE 'skipped' END, "
+                    "bounce_reason=excluded.bounce_reason",
+                    (
+                        sk.get("email", ""),
+                        sk.get("company", ""),
+                        sk.get("sent_at", ""),
+                        sk.get("reason", "Held back -- unverifiable"),
                     ),
                 )
             for o in opens:
@@ -268,6 +287,7 @@ def bulk_sync():
             {
                 "synced_sends": len(sends),
                 "synced_bounces": len(bounces),
+                "synced_skips": len(skips),
                 "synced_opens": len(opens),
             }
         ), 200
@@ -467,6 +487,8 @@ DASHBOARD = """<!DOCTYPE html>
   .filter-btn.f-bounced.active{border-color:var(--red);color:var(--red)}
   .filter-btn.f-unknown.active{border-color:var(--muted);color:var(--muted)}
   .filter-btn.f-sent.active{border-color:var(--green);color:var(--green)}
+  .filter-btn.f-skipped.active{border-color:var(--orange);color:var(--orange)}
+  .pill-skipped{background:rgba(249,115,22,.12);color:var(--orange)}
   .section{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.5rem;margin-bottom:1.5rem;overflow-x:auto}
   .section-title{font-size:1rem;font-weight:600;margin-bottom:1rem}
   table{width:100%;border-collapse:collapse;font-size:.825rem;min-width:860px}
@@ -545,11 +567,12 @@ document.addEventListener("DOMContentLoaded", function() {
 </div>
 <div class="cards">
   <div class="card"><div class="card-label">Total Sent</div><div class="card-value grad">{{ total_sent }}</div></div>
+  <div class="card"><div class="card-label">Skipped (Unverified)</div><div class="card-value" style="color:var(--muted);">{{ total_skipped }}</div></div>
   <div class="card"><div class="card-label">Unique Opens (Tot)</div><div class="card-value blue-g">{{ unique_opens }}</div></div>
   <div class="card"><div class="card-label">Confirmed Opens</div><div class="card-value blue-g" style="background:linear-gradient(135deg,var(--accent),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ unique_confirmed_opens }}</div></div>
   <div class="card"><div class="card-label">Total Clicks</div><div class="card-value grad" style="background:linear-gradient(135deg,var(--accent2),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ total_clicks }}</div></div>
-  <div class="card"><div class="card-label">Open Rate (Tot)</div><div class="card-value green-g">{{ open_rate }}%</div></div>
-  <div class="card"><div class="card-label">Conf. Open Rate</div><div class="card-value green-g" style="background:linear-gradient(135deg,var(--accent2),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ confirmed_open_rate }}%</div></div>
+  <div class="card"><div class="card-label">Open Rate (of Delivered)</div><div class="card-value green-g">{{ open_rate }}%</div></div>
+  <div class="card"><div class="card-label">Conf. Open Rate (of Delivered)</div><div class="card-value green-g" style="background:linear-gradient(135deg,var(--accent2),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">{{ confirmed_open_rate }}%</div></div>
   <div class="card"><div class="card-label">Bounce Rate</div><div class="card-value red-g">{{ bounce_rate }}%</div></div>
 </div>
 <div class="toolbar">
@@ -559,6 +582,7 @@ document.addEventListener("DOMContentLoaded", function() {
   <button class="filter-btn f-opened"  data-filter="opened"  onclick="setFilter('opened')">👁 Opened</button>
   <button class="filter-btn f-clicked" data-filter="clicked" onclick="setFilter('clicked')">🔗 Clicked</button>
   <button class="filter-btn f-bounced" data-filter="bounced" onclick="setFilter('bounced')">⚠ Bounced</button>
+  <button class="filter-btn f-skipped" data-filter="skipped" onclick="setFilter('skipped')">⏭ Skipped</button>
   <button class="filter-btn f-unknown" data-filter="unknown" onclick="setFilter('unknown')">❔ Unknown</button>
 </div>
 <div class="section">
@@ -572,7 +596,7 @@ document.addEventListener("DOMContentLoaded", function() {
     <tbody>
     {% for row in outreach %}
     <tr data-email="{{ row.email }}" data-company="{{ row.company }}"
-        data-status="{% if row.status == 'bounced' %}{% if row.bounce_type == 'unknown' %}unknown{% else %}bounced{% endif %}{% elif row.clicks_count and row.clicks_count > 0 %}clicked{% elif row.opens_count and row.opens_count > 0 %}opened{% else %}sent{% endif %}">
+        data-status="{% if row.status == 'skipped' %}skipped{% elif row.status == 'bounced' %}{% if row.bounce_type == 'unknown' %}unknown{% else %}bounced{% endif %}{% elif row.clicks_count and row.clicks_count > 0 %}clicked{% elif row.opens_count and row.opens_count > 0 %}opened{% else %}sent{% endif %}">
       <td class="email-cell">{{ row.email }}</td>
       <td class="company-cell">{{ row.company or '—' }}</td>
       <td class="datetime-cell" data-utc="{{ row.sent_at or '' }}" style="color:var(--muted);font-size:.78rem;">{{ row.sent_at or '—' }}</td>
@@ -618,7 +642,8 @@ document.addEventListener("DOMContentLoaded", function() {
 
       <!-- Status -->
       <td>
-        {% if row.status == 'bounced' %}
+        {% if row.status == 'skipped' %}<span class="pill pill-skipped" title="Caught by pre-send verification -- never actually sent">⏭ Skipped (Unverified)</span>
+        {% elif row.status == 'bounced' %}
           {% if row.bounce_type == 'hard' %}<span class="pill pill-bounced">⚠ Hard Bounce</span>
           {% elif row.bounce_type == 'soft' %}<span class="pill pill-bounced" style="background:rgba(234,179,8,.15);color:var(--yellow);">⚠ Soft Bounce</span>
           {% else %}<span class="pill pill-bounced" style="background:rgba(100,116,139,.15);color:var(--muted);">❔ Unknown Bounce</span>{% endif %}
@@ -663,7 +688,15 @@ document.addEventListener("DOMContentLoaded", function() {
 @app.route("/stats")
 def stats():
     with get_db() as conn:
-        total_sent = conn.execute("SELECT COUNT(*) FROM sends").fetchone()[0]
+        # "Sent" here means real attempts -- sent successfully or bounced.
+        # Skipped rows were never actually sent, so they're excluded and
+        # reported separately.
+        total_sent = conn.execute(
+            "SELECT COUNT(*) FROM sends WHERE status IN ('sent', 'bounced')"
+        ).fetchone()[0]
+        total_skipped = conn.execute(
+            "SELECT COUNT(*) FROM sends WHERE status='skipped'"
+        ).fetchone()[0]
 
         # Opens
         total_opens = conn.execute("SELECT COUNT(*) FROM opens").fetchone()[0]
@@ -707,14 +740,18 @@ def stats():
             FROM sends s ORDER BY s.sent_at DESC
         """).fetchall()
 
-    open_rate = round((unique_opens / max(total_sent, 1)) * 100) if total_sent else 0
+    total_bounced = hard_bounces + soft_bounces + unknown_bounces
+    # Open rate against everyone we attempted overstates nothing, but understates
+    # engagement among people who actually got the email -- a bounced address
+    # could never have been opened, so it shouldn't count in that denominator.
+    delivered = max(total_sent - total_bounced, 0)
+
+    open_rate = round((unique_opens / max(delivered, 1)) * 100) if delivered else 0
     confirmed_open_rate = (
-        round((unique_confirmed_opens / max(total_sent, 1)) * 100) if total_sent else 0
+        round((unique_confirmed_opens / max(delivered, 1)) * 100) if delivered else 0
     )
     bounce_rate = (
-        round(
-            ((hard_bounces + soft_bounces + unknown_bounces) / max(total_sent, 1)) * 100
-        )
+        round((total_bounced / max(total_sent, 1)) * 100)
         if total_sent
         else 0
     )
@@ -722,6 +759,8 @@ def stats():
     return render_template_string(
         DASHBOARD,
         total_sent=total_sent,
+        total_skipped=total_skipped,
+        delivered=delivered,
         total_opens=total_opens,
         unique_opens=unique_opens,
         unique_confirmed_opens=unique_confirmed_opens,

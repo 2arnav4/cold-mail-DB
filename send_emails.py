@@ -50,6 +50,8 @@ def _load_env(path=".env"):
 
 _load_env()
 
+from email_verify import verify_email  # noqa: E402 (must load after _load_env populates os.environ)
+
 CONFIG = {
     "your_email": _os.environ.get("GMAIL_ADDRESS", ""),
     "app_password": _os.environ.get("GMAIL_APP_PASSWORD", ""),
@@ -58,7 +60,7 @@ CONFIG = {
     "db_path": "turso-full.db",
     "template_path": "template.txt",
     "log_path": "sent_log.json",
-    "daily_limit": 60,
+    "daily_limit": 100,
     "tracker_url": _os.environ.get("TRACKER_URL", ""),
 }
 
@@ -298,6 +300,7 @@ CONTACT_QUERY = """
         ct.name      AS contact_name,
         ct.role      AS contact_role,
         ct.email     AS contact_email,
+        co.id        AS company_id,
         co.name      AS company_name,
         co.domain    AS company_domain,
         co.industry  AS company_industry,
@@ -455,19 +458,34 @@ def sync_tracker_from_logs(cfg: dict):
         if email not in details_emails:
             sends.append({"email": email, "company": "", "sent_at": ""})
 
-    bounces = [
-        {
-            "email": b["email"],
-            "company": b.get("company", ""),
-            "reason": b.get("error", "Bounce — invalid address"),
-            "sent_at": b.get("time", ""),
-        }
-        for b in failed
-    ]
+    # "Failed verification: ..." entries were caught by the pre-send check and
+    # never actually sent -- those are skips, not bounces. Everything else was
+    # a real send attempt that failed (either a genuine mailer-daemon bounce,
+    # which already carries its own bounce_type, or an SMTP-time exception,
+    # which doesn't -- default that case to "unknown" rather than assuming hard).
+    bounces = []
+    skips = []
+    for b in failed:
+        reason = b.get("error", "Bounce — invalid address")
+        if isinstance(reason, str) and reason.startswith("Failed verification:"):
+            skips.append({
+                "email": b["email"],
+                "company": b.get("company", ""),
+                "reason": reason,
+                "sent_at": b.get("time", ""),
+            })
+        else:
+            bounces.append({
+                "email": b["email"],
+                "company": b.get("company", ""),
+                "reason": reason,
+                "bounce_type": b.get("bounce_type", "unknown"),
+                "sent_at": b.get("time", ""),
+            })
 
     try:
         payload = _json.dumps(
-            {"sends": sends, "bounces": bounces, "opens": local_opens}
+            {"sends": sends, "bounces": bounces, "skips": skips, "opens": local_opens}
         ).encode()
         req = urllib.request.Request(
             f"{tracker_url}/api/bulk_sync",
@@ -478,7 +496,8 @@ def sync_tracker_from_logs(cfg: dict):
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = _json.loads(resp.read())
         print(
-            f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces, {result.get('synced_opens', 0)} opens"
+            f"  Tracker synced — {result.get('synced_sends', 0)} sends, {result.get('synced_bounces', 0)} bounces, "
+            f"{result.get('synced_skips', 0)} skipped, {result.get('synced_opens', 0)} opens"
         )
     except Exception as e:
         print(f"  Tracker sync warning: {e}")
@@ -629,6 +648,34 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
         )
 
     return msg
+
+
+def remove_contacted_from_db(db_path: str, log_path: str):
+    """Clean up contacted email addresses from the local database before sending."""
+    try:
+        contacted_emails = set()
+        if os.path.exists(log_path):
+            with open(log_path, "r") as f:
+                log_data = json.load(f)
+                contacted_emails.update(log_data.get("sent", []))
+        
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT email FROM contacts WHERE id IN (SELECT contact_id FROM send_queue WHERE status IN ('SENT', 'DONE'))")
+        for row in cur.fetchall():
+            if row[0]:
+                contacted_emails.add(row[0])
+            
+        if contacted_emails:
+            to_delete = [(email,) for email in contacted_emails if email]
+            cur.executemany("DELETE FROM contacts WHERE email = ?", to_delete)
+            conn.commit()
+            deleted_count = conn.total_changes
+            if deleted_count > 0:
+                print(f"  Pre-send Cleanup: Removed {deleted_count} already-contacted contacts from local database.")
+        conn.close()
+    except Exception as e:
+        print(f"  Warning: Pre-send database cleanup failed: {e}")
 
 
 def fetch_contacts(db_path: str) -> list:
@@ -943,6 +990,58 @@ def check_and_sync_bounces(cfg: dict) -> list:
     return bounced_emails
 
 
+
+def move_to_wrong_address(db_path: str, contact: dict, service: str, reason: str):
+    """Remove a contact from `contacts` and record it in `wrong_address` so it
+    never resurfaces in a future CONTACT_QUERY."""
+    from datetime import datetime
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO wrong_address
+                (original_contact_id, company_id, company_name, name, role, email,
+                 failed_service, invalid_reason, checked_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                contact["contact_id"],
+                contact.get("company_id"),
+                contact.get("company_name"),
+                contact.get("contact_name"),
+                contact.get("contact_role"),
+                contact["contact_email"],
+                service,
+                reason,
+                datetime.now().isoformat(),
+            ),
+        )
+        cur.execute("DELETE FROM contacts WHERE id = ?", (contact["contact_id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def hold_back_contact(db_path: str, contact_id: int, reason: str):
+    """Excludes a contact from the send queue without discarding it -- unlike
+    move_to_wrong_address, this is for addresses that couldn't be confirmed
+    either way (catch-all domain, or SMTP gave no real answer), not addresses
+    confirmed bad. Kept in `contacts` so it can be revisited manually or by a
+    future verification pass; CONTACT_QUERY's `is_invalid = 0` filter keeps it
+    out of the queue in the meantime."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE contacts SET is_invalid = 1, invalid_reason = ? WHERE id = ?",
+            (reason, contact_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cold Mail Sender")
     parser.add_argument(
@@ -950,7 +1049,12 @@ def main():
         action="store_true",
         help="Print emails without actually sending them",
     )
-    parser.add_argument("--limit", type=int, help="Override daily limit for this run")
+    parser.add_argument("--limit", type=int, help="Cap how many we send THIS run (never exceeds the daily quota)")
+    parser.add_argument(
+        "--daily-limit",
+        type=int,
+        help="Override cfg['daily_limit'] for this run only (lets today's send count exceed the normal cap)",
+    )
     parser.add_argument(
         "--show-queue",
         action="store_true",
@@ -964,6 +1068,9 @@ def main():
     args = parser.parse_args()
     dry_run = args.dry_run
     cfg = CONFIG.copy()
+
+    if args.daily_limit:
+        cfg["daily_limit"] = args.daily_limit
 
     # Handle manual bounce check flag
     if args.check_bounces:
@@ -1012,6 +1119,9 @@ def main():
         print("ERROR: Template missing 'Subject:' line on the first line.")
         sys.exit(1)
 
+    # Pre-send check: remove already contacted addresses from database
+    remove_contacted_from_db(cfg["db_path"], cfg["log_path"])
+
     # Fetch contacts
     all_contacts = fetch_contacts(cfg["db_path"])
     print(f"  Total contacts in DB: {len(all_contacts)}")
@@ -1053,13 +1163,41 @@ def main():
             print("  Generate one at: https://myaccount.google.com/apppasswords")
             sys.exit(1)
 
+    # In dry-run we just preview the top of the queue. In a real run, invalid
+    # addresses get filtered out live by the verification waterfall, so we walk
+    # the full priority-ordered queue and keep going until quota_left contacts
+    # have actually been sent to (or the queue runs out) — otherwise skipped
+    # invalids would silently shrink today's real send count below the daily cap.
+    candidates = batch if dry_run else queue
+
     try:
-        for i, contact in enumerate(batch, 1):
+        for i, contact in enumerate(candidates, 1):
+            if not dry_run and len(sent_this_run) >= quota_left:
+                break
+
             email_addr = contact["contact_email"]
             company = contact["company_name"]
             role = contact["contact_role"] or "—"
 
-            print(f"  [{i:02d}/{len(batch)}] {email_addr:40s} | {company} | {role}")
+            progress = f"{len(sent_this_run) + 1:02d}/{quota_left}" if not dry_run else f"{i:02d}/{len(batch)}"
+            print(f"  [{progress}] {email_addr:40s} | {company} | {role}")
+
+            if not dry_run:
+                is_valid, checked_by = verify_email(email_addr)
+                if is_valid is False:
+                    print(f"         Invalid ({checked_by}). Moving to wrong_address, skipping.")
+                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}")
+                    move_to_wrong_address(cfg["db_path"], contact, checked_by, "failed verification")
+                    continue
+                if is_valid is None:
+                    # Unverifiable (catch-all domain, or SMTP gave no real answer) --
+                    # hold back rather than send or discard. Kept in `contacts` so
+                    # it can be revisited later, just excluded from the queue for now.
+                    print(f"         Unverifiable ({checked_by}). Holding back, not sending.")
+                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}")
+                    hold_back_contact(cfg["db_path"], contact["contact_id"], checked_by)
+                    continue
+
 
             if dry_run:
                 personalized = PERSONALIZED_EMAILS.get(email_addr)
