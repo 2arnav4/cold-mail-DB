@@ -96,6 +96,25 @@ def verify_smtp(email: str) -> bool | None:
                 pass
 
 
+GOOGLE_MX_SUBSTRINGS = ("google.com", "googlemail.com")
+
+
+def is_google_hosted(domain: str) -> bool:
+    """Gmail and Google Workspace-hosted domains accept RCPT TO broadly at
+    the protocol level regardless of whether the domain owner actually
+    configured a catch-all alias -- that's just how Google's MTA behaves.
+    Probing them the same way as a real catch-all server would flag every
+    single Google-hosted domain as "catch-all", which is the vast majority
+    of startups and would hold back good addresses for the wrong reason.
+    This is a known, pre-existing accepted blind spot (see module docstring),
+    not something the catch-all probe can meaningfully resolve."""
+    try:
+        records = dns.resolver.resolve(domain, "MX")
+        return any(any(s in str(r.exchange).lower() for s in GOOGLE_MX_SUBSTRINGS) for r in records)
+    except Exception:
+        return False
+
+
 def is_catchall_domain(domain: str) -> bool | None:
     """Probes an obviously-fake address at `domain` to see whether the mail
     server accepts RCPT TO for literally anyone (a catch-all/accept-all
@@ -103,7 +122,11 @@ def is_catchall_domain(domain: str) -> bool | None:
     delivery -- not at RCPT time -- so a 250 on the real address tells us
     nothing there. Returns True (catch-all, real-address result untrustworthy),
     False (domain properly rejects unknowns, real-address result trustworthy),
-    or None (couldn't determine, e.g. MX/connection issue)."""
+    or None (couldn't determine, e.g. MX/connection issue).
+
+    Skips Google-hosted domains entirely -- see is_google_hosted."""
+    if is_google_hosted(domain):
+        return False
     fake_local = "zzz-nonexistent-" + "".join(random.choices(string.digits, k=10))
     return verify_smtp(f"{fake_local}@{domain}")
 
