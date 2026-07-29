@@ -1143,6 +1143,65 @@ def hold_back_contact(db_path: str, contact_id: int, reason: str):
         conn.close()
 
 
+def send_test_email(cfg: dict, recipient: str):
+    """Send one rendered email to `recipient` and stop.
+
+    Deliberately isolated from the campaign: it does not read the queue, does
+    not consume daily quota, and writes nothing to the send log. The point is to
+    see exactly what a contact receives -- HTML rendering, the resume
+    attachment, the tracking pixel, the signed click links -- without a real
+    address being involved."""
+    if not cfg["your_email"] or not cfg["app_password"]:
+        print("ERROR: GMAIL_ADDRESS / GMAIL_APP_PASSWORD not set in .env.")
+        sys.exit(1)
+
+    if cfg.get("tracker_url") and not cfg.get("tracker_secret"):
+        print(
+            "  WARNING: TRACKER_SECRET is unset, so links will NOT be wrapped and "
+            "the pixel will not record. Set it locally and on the tracker service "
+            "first if you want to test tracking."
+        )
+
+    subject_template, body_template = load_template(cfg["template_path"])
+    contact = {
+        "contact_id": 0,
+        "company_id": 0,
+        "contact_email": recipient,
+        "contact_name": cfg["your_name"],
+        "contact_role": "Test Recipient",
+        "company_name": "Test Company",
+        "company_domain": "example.com",
+        "company_industry": "",
+        "funding_stage": "",
+    }
+
+    msg = build_email(cfg, contact, subject_template, body_template)
+    print(f"\nTest send")
+    print(f"  From    : {cfg['your_email']}")
+    print(f"  To      : {recipient}")
+    print(f"  Subject : {msg['Subject']}")
+
+    html = ""
+    for part in msg.walk():
+        if part.get_content_type() == "text/html":
+            html = part.get_payload(decode=True).decode()
+    tracker_url = cfg.get("tracker_url", "").rstrip("/")
+    print(f"  Pixel   : {'yes' if tracker_url and f'{tracker_url}/t/' in html else 'no'}")
+    print(f"  Links   : {'wrapped + signed' if tracker_url and f'{tracker_url}/c/' in html else 'not wrapped'}")
+    print(f"  Resume  : {'attached' if any(p.get_filename() for p in msg.walk()) else 'MISSING'}")
+
+    try:
+        conn = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+        conn.login(cfg["your_email"], cfg["app_password"].replace(" ", ""))
+        conn.send_message(msg)
+        conn.quit()
+    except Exception as e:
+        print(f"\n  FAILED: {e}")
+        sys.exit(1)
+
+    print(f"\n  SENT. Nothing was written to {cfg['log_path']} and no quota was used.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cold Mail Sender")
     parser.add_argument(
@@ -1166,6 +1225,13 @@ def main():
         action="store_true",
         help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit",
     )
+    parser.add_argument(
+        "--test-send",
+        metavar="EMAIL",
+        help="Send one rendered email to EMAIL and exit. Touches no contact, "
+             "writes nothing to the send log or quota. For verifying SMTP, HTML "
+             "rendering, the attachment and the tracking links end to end.",
+    )
     args = parser.parse_args()
     dry_run = args.dry_run
     cfg = CONFIG.copy()
@@ -1176,6 +1242,10 @@ def main():
     # Handle manual bounce check flag
     if args.check_bounces:
         check_and_sync_bounces(cfg)
+        sys.exit(0)
+
+    if args.test_send:
+        send_test_email(cfg, args.test_send)
         sys.exit(0)
 
     # Validate config. These used to compare against the placeholder strings
