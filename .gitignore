@@ -24,3 +24,6 @@ venv/
 bounce_scan.log
 sent_log_opens.json
 
+
+# Contact databases stay local. Personal data, never pushed.
+hr-database/

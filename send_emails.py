@@ -650,6 +650,21 @@ def sign_payload(encoded: str, secret: str) -> str:
 
 
 def wrap_links(text, email, company, tracker_url, secret=""):
+    """DO NOT CALL. Kept only so the tracker's /c/ route has a documented origin.
+
+    Click tracking is off by design. Wiring this into build_email mangles the
+    template two ways:
+
+      1. url_pattern below treats ")" as a valid URL character, so in
+         "[Pulse](https://pulse.app)" it swallows the closing paren. The
+         markdown-link regex in text_to_html then fails to match and the line
+         renders as literal "[Pulse](https://...)" text.
+      2. For a bare URL, text_to_html auto-links whatever string is there --
+         so the recipient sees the opaque tracker URL as the visible link text
+         instead of "arnav24.tech".
+
+    The links in template.txt are the point of the email. They ship untouched.
+    """
     if not tracker_url or not secret:
         # Without a secret the link cannot be signed, and an unsigned redirect
         # is worse than no click tracking. Leave the real URLs in place.
@@ -696,24 +711,10 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
         encoded = _b64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
         pixel_tag = f'<img src="{tracker_url}/t/{encoded}.gif" width="1" height="1" style="display:none;" />'
 
-    # Rewrite outbound links through the tracker's /c/ redirect. This call was
-    # missing entirely: wrap_links was defined and never invoked, so the /c/
-    # route, the clicks table and every "Clicked" column on the dashboard were
-    # reading zero permanently.
-    #
-    # Only the HTML part is rewritten. The plain-text alternative keeps the real
-    # URLs, because a recipient reading source shouldn't be handed an opaque
-    # redirect, and text-only clients would show the tracker domain as the
-    # visible link text.
+    # NOTE: outbound links are deliberately NOT rewritten through the tracker.
+    # wrap_links stays unused on purpose -- see the warning on that function.
+    # The body ships with the exact URLs written in template.txt.
     html_body = final_body
-    if tracker_url:
-        html_body = wrap_links(
-            final_body,
-            contact["contact_email"],
-            contact.get("company_name", "") or "",
-            tracker_url,
-            cfg.get("tracker_secret", ""),
-        )
 
     # Send as multipart/alternative (plain text + HTML) so links are clickable
     msg = MIMEMultipart("mixed")  # outer container (holds alternative + attachment)
@@ -768,6 +769,46 @@ def contacted_in_db(db_path: str) -> set:
     except Exception as e:
         print(f"  Warning: could not read send_queue history: {e}")
         return set()
+
+
+def load_contacts_from_csv(csv_path: str) -> list:
+    """Read contacts from a local CSV instead of turso-full.db.
+
+    Column names are matched case-insensitively so the files in hr-database/
+    work as-is despite having different headers -- `priority-outreach` leads
+    with Priority/Tier, `HR_LIST 300` leads with SNo. Only Email is required.
+
+    Rows carry contact_id None, which the send loop reads as "not backed by the
+    database": a bad address is logged but no DELETE or UPDATE is attempted
+    against `contacts`, because there is no row there to touch."""
+    import csv as _csv
+
+    def pick(row: dict, *names):
+        for want in names:
+            for key, val in row.items():
+                if key and key.strip().lower() == want:
+                    return (val or "").strip()
+        return ""
+
+    contacts = []
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        for row in _csv.DictReader(f):
+            email = pick(row, "email", "contact_email")
+            if not email or "@" not in email:
+                continue
+            contacts.append({
+                "contact_id": None,
+                "contact_name": pick(row, "name", "contact_name"),
+                "contact_role": pick(row, "title", "role", "contact_role"),
+                "contact_email": email,
+                "company_id": None,
+                "company_name": pick(row, "company", "company_name"),
+                "company_domain": pick(row, "domain", "company_domain")
+                                  or email.split("@", 1)[1],
+                "company_industry": "",
+                "funding_stage": "",
+            })
+    return contacts
 
 
 def fetch_contacts(db_path: str) -> list:
@@ -1226,6 +1267,12 @@ def main():
         help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit",
     )
     parser.add_argument(
+        "--csv",
+        metavar="PATH",
+        help="Read contacts from a local CSV instead of turso-full.db. The "
+             "files in hr-database/ stay on this machine and are never pushed.",
+    )
+    parser.add_argument(
         "--test-send",
         metavar="EMAIL",
         help="Send one rendered email to EMAIL and exit. Touches no contact, "
@@ -1305,8 +1352,16 @@ def main():
     excluded = sent_index(log) | contacted_in_db(cfg["db_path"])
 
     # Fetch contacts
-    all_contacts = fetch_contacts(cfg["db_path"])
-    print(f"  Total contacts in DB: {len(all_contacts)}")
+    if args.csv:
+        if not os.path.exists(args.csv):
+            print(f"ERROR: CSV not found: {args.csv}")
+            sys.exit(1)
+        all_contacts = load_contacts_from_csv(args.csv)
+        print(f"  Source              : {args.csv}")
+        print(f"  Total contacts in CSV: {len(all_contacts)}")
+    else:
+        all_contacts = fetch_contacts(cfg["db_path"])
+        print(f"  Total contacts in DB: {len(all_contacts)}")
 
     # Filter out already-sent
     queue = [c for c in all_contacts if not already_sent(excluded, c["contact_email"])]
@@ -1370,10 +1425,14 @@ def main():
 
             if not dry_run:
                 is_valid, checked_by = verify_email(email_addr)
+                # contact_id is None for CSV-sourced rows -- there is no database
+                # row behind them, so record the outcome but skip the DB writes.
+                from_db = contact.get("contact_id") is not None
                 if is_valid is False:
-                    print(f"         Invalid ({checked_by}). Moving to wrong_address, skipping.")
+                    print(f"         Invalid ({checked_by}). Skipping.")
                     record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}", kind="skip")
-                    move_to_wrong_address(cfg["db_path"], contact, checked_by, "failed verification")
+                    if from_db:
+                        move_to_wrong_address(cfg["db_path"], contact, checked_by, "failed verification")
                     continue
                 if is_valid is None:
                     # Unverifiable (catch-all domain, or SMTP gave no real answer) --
@@ -1381,7 +1440,8 @@ def main():
                     # it can be revisited later, just excluded from the queue for now.
                     print(f"         Unverifiable ({checked_by}). Holding back, not sending.")
                     record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}", kind="skip")
-                    hold_back_contact(cfg["db_path"], contact["contact_id"], checked_by)
+                    if from_db:
+                        hold_back_contact(cfg["db_path"], contact["contact_id"], checked_by)
                     continue
 
 
