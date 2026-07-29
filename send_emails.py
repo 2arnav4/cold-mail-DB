@@ -23,7 +23,7 @@ import json
 import os
 import sys
 import argparse
-from datetime import date
+from datetime import date, datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -65,6 +65,15 @@ CONFIG = {
     "tracker_url": _os.environ.get("TRACKER_URL", ""),
     "tracker_secret": _os.environ.get("TRACKER_SECRET", ""),
 }
+
+
+def utc_stamp() -> str:
+    """Current UTC as 'YYYY-MM-DD HH:MM:SS'.
+
+    datetime.utcnow() is deprecated from Python 3.12 and returns a naive
+    datetime that merely happens to hold UTC, which is how timezone bugs start.
+    The stored format is unchanged, so existing log entries stay comparable."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def tracker_headers(cfg: dict, content_type: str = "") -> dict:
@@ -362,10 +371,18 @@ def load_failed_log(log_path: str) -> list:
     return []
 
 
-def record_failed(log_path: str, contact: dict, error: str):
-    """Append a failed send to failed_log.json."""
-    from datetime import datetime
+def record_failed(log_path: str, contact: dict, error: str, kind: str = "send_error"):
+    """Append a failed send to failed_log.json.
 
+    `kind` is what downstream classification reads:
+      "skip"       -- pre-send verification held it back; nothing was attempted
+      "send_error" -- a real attempt that failed at SMTP time
+      "bounce"     -- a mailer-daemon DSN (written by check_and_sync_bounces)
+
+    This used to be inferred by testing whether `error` started with the literal
+    "Failed verification:". Any rewording of that message silently reclassified
+    every skip as a bounce, which is not a distinction to leave resting on a
+    prefix match."""
     failed_path = log_path.replace(".json", "_failed.json")
     failed = load_failed_log(log_path)
     failed.append(
@@ -374,15 +391,27 @@ def record_failed(log_path: str, contact: dict, error: str):
             "name": contact.get("contact_name") or "",
             "company": contact.get("company_name") or "",
             "error": str(error),
-            "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "kind": kind,
+            "time": utc_stamp(),
         }
     )
     with open(failed_path, "w") as f:
         json.dump(failed, f, indent=2)
 
 
-def already_sent(log: dict, email: str) -> bool:
-    return email in log["sent"]
+def sent_index(log: dict) -> set:
+    """Lowercased set of everything already sent.
+
+    Two reasons this isn't a plain `email in log["sent"]`. Local-parts are
+    case-sensitive per RFC 5321, but no provider in practice treats them that
+    way, so an address that differs only in case is the same mailbox and must
+    not be mailed twice. And membership against a list is O(n) per contact,
+    which over the whole queue is O(n*m) for no reason."""
+    return {e.lower() for e in log.get("sent", [])}
+
+
+def already_sent(sent_set: set, email: str) -> bool:
+    return email.lower() in sent_set
 
 
 def sent_today(log: dict) -> int:
@@ -392,14 +421,12 @@ def sent_today(log: dict) -> int:
 
 def record_sent(log: dict, email: str, company: str = ""):
     """Record a successful send — email list, daily count, and per-email details."""
-    from datetime import datetime
-
     today = str(date.today())
     log["sent"].append(email)
     log["daily"][today] = log["daily"].get(today, 0) + 1
     log["details"][email] = {
         "company": company,
-        "sent_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "sent_at": utc_stamp(),
     }
 
 
@@ -474,16 +501,27 @@ def sync_tracker_from_logs(cfg: dict):
         if email not in details_emails:
             sends.append({"email": email, "company": "", "sent_at": ""})
 
-    # "Failed verification: ..." entries were caught by the pre-send check and
-    # never actually sent -- those are skips, not bounces. Everything else was
-    # a real send attempt that failed (either a genuine mailer-daemon bounce,
-    # which already carries its own bounce_type, or an SMTP-time exception,
-    # which doesn't -- default that case to "unknown" rather than assuming hard).
+    # Entries caught by the pre-send check were never actually sent -- those are
+    # skips, not bounces. Everything else was a real attempt that failed, either
+    # a genuine mailer-daemon bounce (which carries its own bounce_type) or an
+    # SMTP-time exception (which doesn't -- default that to "unknown" rather
+    # than assuming hard).
+    #
+    # Classification reads the explicit "kind" field. Records written before
+    # that field existed fall back to the old prefix test so history still
+    # classifies the same way.
     bounces = []
     skips = []
     for b in failed:
         reason = b.get("error", "Bounce — invalid address")
-        if isinstance(reason, str) and reason.startswith("Failed verification:"):
+        kind = b.get("kind")
+        if kind is None:
+            kind = (
+                "skip"
+                if isinstance(reason, str) and reason.startswith("Failed verification:")
+                else "bounce"
+            )
+        if kind == "skip":
             skips.append({
                 "email": b["email"],
                 "company": b.get("company", ""),
@@ -596,13 +634,35 @@ def text_to_html(text: str, pixel_tag: str = "") -> str:
 </html>"""
 
 
-def wrap_links(text, email, company, tracker_url):
-    if not tracker_url:
+def sign_payload(encoded: str, secret: str) -> str:
+    """Truncated HMAC over the encoded click payload.
+
+    The payload carries the redirect target, and /c/ is unauthenticated by
+    necessity. Without a signature anyone could base64 their own destination
+    and turn the tracker domain into an open redirect pointing at whatever they
+    liked -- a phishing primitive wearing your hostname. The tracker recomputes
+    this and refuses to redirect if it doesn't match."""
+    import hmac
+    import hashlib
+
+    digest = hmac.new(secret.encode(), encoded.encode(), hashlib.sha256).hexdigest()
+    return digest[:16]
+
+
+def wrap_links(text, email, company, tracker_url, secret=""):
+    if not tracker_url or not secret:
+        # Without a secret the link cannot be signed, and an unsigned redirect
+        # is worse than no click tracking. Leave the real URLs in place.
         return text
     import re
     import base64
 
     tracker_clean = tracker_url.rstrip("/")
+
+    # "|" is the field separator in the encoded payload and /c/ splits with
+    # maxsplit=2, so a company name containing one would shift the target URL
+    # into the company field and break the redirect.
+    company = (company or "").replace("|", "/")
 
     def replace_url(match):
         url = match.group(1)
@@ -610,7 +670,7 @@ def wrap_links(text, email, company, tracker_url):
             return url
         payload = f"{email}|{company}|{url}"
         encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-        return f"{tracker_clean}/c/{encoded}"
+        return f"{tracker_clean}/c/{encoded}.{sign_payload(encoded, secret)}"
 
     url_pattern = r"(https?://[a-zA-Z0-9.\-_~!$&\'()*+,;=:@/%?#]+)"
     return re.sub(url_pattern, replace_url, text)
@@ -636,6 +696,25 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
         encoded = _b64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
         pixel_tag = f'<img src="{tracker_url}/t/{encoded}.gif" width="1" height="1" style="display:none;" />'
 
+    # Rewrite outbound links through the tracker's /c/ redirect. This call was
+    # missing entirely: wrap_links was defined and never invoked, so the /c/
+    # route, the clicks table and every "Clicked" column on the dashboard were
+    # reading zero permanently.
+    #
+    # Only the HTML part is rewritten. The plain-text alternative keeps the real
+    # URLs, because a recipient reading source shouldn't be handed an opaque
+    # redirect, and text-only clients would show the tracker domain as the
+    # visible link text.
+    html_body = final_body
+    if tracker_url:
+        html_body = wrap_links(
+            final_body,
+            contact["contact_email"],
+            contact.get("company_name", "") or "",
+            tracker_url,
+            cfg.get("tracker_secret", ""),
+        )
+
     # Send as multipart/alternative (plain text + HTML) so links are clickable
     msg = MIMEMultipart("mixed")  # outer container (holds alternative + attachment)
     msg["From"] = f"{cfg['your_name']} <{cfg['your_email']}>"
@@ -645,7 +724,7 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     # Inner multipart/alternative for plain + HTML
     alt = MIMEMultipart("alternative")
     alt.attach(MIMEText(final_body, "plain", "utf-8"))
-    alt.attach(MIMEText(text_to_html(final_body, pixel_tag), "html", "utf-8"))
+    alt.attach(MIMEText(text_to_html(html_body, pixel_tag), "html", "utf-8"))
     msg.attach(alt)
 
     # Attach resume if it exists
@@ -666,32 +745,29 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     return msg
 
 
-def remove_contacted_from_db(db_path: str, log_path: str):
-    """Clean up contacted email addresses from the local database before sending."""
+def contacted_in_db(db_path: str) -> set:
+    """Addresses the send_queue already marked SENT/DONE, lowercased.
+
+    This used to be `remove_contacted_from_db`, which DELETEd the matching rows
+    from `contacts` outright. Two things were wrong with that. It matched on
+    email rather than id, so one address shared by two company_ids took both
+    rows down with it. And it was an unrecoverable delete of the only structured
+    record of a contact -- leaving sent_log.json, an untracked file, as the sole
+    history. Excluding a contact from today's queue does not require destroying
+    it, so this returns a set to filter with and writes nothing."""
     try:
-        contacted_emails = set()
-        if os.path.exists(log_path):
-            with open(log_path, "r") as f:
-                log_data = json.load(f)
-                contacted_emails.update(log_data.get("sent", []))
-        
         conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT DISTINCT email FROM contacts WHERE id IN (SELECT contact_id FROM send_queue WHERE status IN ('SENT', 'DONE'))")
-        for row in cur.fetchall():
-            if row[0]:
-                contacted_emails.add(row[0])
-            
-        if contacted_emails:
-            to_delete = [(email,) for email in contacted_emails if email]
-            cur.executemany("DELETE FROM contacts WHERE email = ?", to_delete)
-            conn.commit()
-            deleted_count = conn.total_changes
-            if deleted_count > 0:
-                print(f"  Pre-send Cleanup: Removed {deleted_count} already-contacted contacts from local database.")
-        conn.close()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT email FROM contacts WHERE id IN "
+                "(SELECT contact_id FROM send_queue WHERE status IN ('SENT', 'DONE'))"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {r[0].lower() for r in rows if r[0]}
     except Exception as e:
-        print(f"  Warning: Pre-send database cleanup failed: {e}")
+        print(f"  Warning: could not read send_queue history: {e}")
+        return set()
 
 
 def fetch_contacts(db_path: str) -> list:
@@ -726,7 +802,6 @@ def check_and_sync_bounces(cfg: dict) -> list:
     import re
     import urllib.request as _urllib
     import json as _json
-    from datetime import datetime
 
     print("Checking Gmail for new bounces via IMAP...")
     email_addr = cfg["your_email"]
@@ -934,24 +1009,36 @@ def check_and_sync_bounces(cfg: dict) -> list:
         if email not in log["sent"]:
             log["sent"].append(email)
 
-            # Decrement daily quota for the actual send date
+        if email not in existing_failed:
+            # A bounce means the message never landed, so it shouldn't keep
+            # occupying a slot in the daily quota for the day it went out. The
+            # decrement used to sit inside `if email not in log["sent"]`, which
+            # is exactly backwards -- a bounce is by definition for something we
+            # did send, so the address was already in `sent` and the branch never
+            # ran. 495 of the entries in the failed log are in `sent`, so this
+            # had effectively never fired.
+            #
+            # Gating the refund on "not already in existing_failed" makes it
+            # idempotent for free: `failed` is persisted, so a re-scan of the
+            # same bounce cannot refund the same day twice.
             sent_at = log.get("details", {}).get(email, {}).get("sent_at", "")
             sent_day = sent_at.split(" ")[0] if sent_at else None
             if sent_day and sent_day in log["daily"]:
                 log["daily"][sent_day] = max(0, log["daily"][sent_day] - 1)
 
-        if email not in existing_failed:
             failed.append(
                 {
                     "email": email,
                     "name": "",
                     "company": log.get("details", {}).get(email, {}).get("company", ""),
                     "error": rec["reason"],
+                    "kind": "bounce",
                     "bounce_type": rec["bounce_type"],
                     "retry_after": rec["retry_after"],
-                    "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "time": utc_stamp(),
                 }
             )
+            existing_failed.add(email)
             new_bounces_logged += 1
 
             if tracker_url:
@@ -1010,8 +1097,6 @@ def check_and_sync_bounces(cfg: dict) -> list:
 def move_to_wrong_address(db_path: str, contact: dict, service: str, reason: str):
     """Remove a contact from `contacts` and record it in `wrong_address` so it
     never resurfaces in a future CONTACT_QUERY."""
-    from datetime import datetime
-
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
@@ -1093,14 +1178,23 @@ def main():
         check_and_sync_bounces(cfg)
         sys.exit(0)
 
-    # Validate config
+    # Validate config. These used to compare against the placeholder strings
+    # "you@gmail.com" and "xxxx xxxx xxxx xxxx", which stopped existing when
+    # CONFIG moved to os.environ.get(..., "") -- so a missing .env sailed past
+    # both guards and surfaced as an opaque Gmail auth failure instead.
     if not dry_run:
-        if cfg["your_email"] == "you@gmail.com":
-            print("ERROR: Please set your_email in CONFIG before running.")
+        if not cfg["your_email"]:
+            print("ERROR: GMAIL_ADDRESS is not set. Add it to .env before running.")
             sys.exit(1)
-        if cfg["app_password"] == "xxxx xxxx xxxx xxxx":
-            print("ERROR: Please set your Gmail app_password in CONFIG before running.")
+        if not cfg["app_password"]:
+            print("ERROR: GMAIL_APP_PASSWORD is not set. Add it to .env before running.")
+            print("  Generate one at: https://myaccount.google.com/apppasswords")
             sys.exit(1)
+        if cfg["tracker_url"] and not cfg["tracker_secret"]:
+            print(
+                "  WARNING: TRACKER_URL is set but TRACKER_SECRET is not. Every "
+                "tracker write will be rejected and no sends will be recorded."
+            )
 
     # Automatically check for bounces on startup (if not a dry run)
     if not dry_run:
@@ -1135,15 +1229,17 @@ def main():
         print("ERROR: Template missing 'Subject:' line on the first line.")
         sys.exit(1)
 
-    # Pre-send check: remove already contacted addresses from database
-    remove_contacted_from_db(cfg["db_path"], cfg["log_path"])
+    # Everyone already contacted, from both sources of truth: the local send log
+    # and any send_queue row the DB marked SENT/DONE. Previously the DB half of
+    # this was applied by deleting those contact rows outright; it's a filter now.
+    excluded = sent_index(log) | contacted_in_db(cfg["db_path"])
 
     # Fetch contacts
     all_contacts = fetch_contacts(cfg["db_path"])
     print(f"  Total contacts in DB: {len(all_contacts)}")
 
     # Filter out already-sent
-    queue = [c for c in all_contacts if not already_sent(log, c["contact_email"])]
+    queue = [c for c in all_contacts if not already_sent(excluded, c["contact_email"])]
     print(f"  Unsent contacts     : {len(queue)}")
 
     if args.show_queue:
@@ -1166,10 +1262,14 @@ def main():
     sent_this_run = []
     smtp_conn = None
 
+    def smtp_connect():
+        conn = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+        conn.login(cfg["your_email"], cfg["app_password"].replace(" ", ""))
+        return conn
+
     if not dry_run:
         try:
-            smtp_conn = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-            smtp_conn.login(cfg["your_email"], cfg["app_password"].replace(" ", ""))
+            smtp_conn = smtp_connect()
             print(f"  Gmail SMTP connected\n")
         except Exception as e:
             print(f"ERROR: Gmail login failed: {e}")
@@ -1202,7 +1302,7 @@ def main():
                 is_valid, checked_by = verify_email(email_addr)
                 if is_valid is False:
                     print(f"         Invalid ({checked_by}). Moving to wrong_address, skipping.")
-                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}")
+                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}", kind="skip")
                     move_to_wrong_address(cfg["db_path"], contact, checked_by, "failed verification")
                     continue
                 if is_valid is None:
@@ -1210,7 +1310,7 @@ def main():
                     # hold back rather than send or discard. Kept in `contacts` so
                     # it can be revisited later, just excluded from the queue for now.
                     print(f"         Unverifiable ({checked_by}). Holding back, not sending.")
-                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}")
+                    record_failed(cfg["log_path"], contact, f"Failed verification: {checked_by}", kind="skip")
                     hold_back_contact(cfg["db_path"], contact["contact_id"], checked_by)
                     continue
 
@@ -1236,7 +1336,24 @@ def main():
 
             try:
                 msg = build_email(cfg, contact, subject_template, body_template)
-                smtp_conn.send_message(msg)
+                try:
+                    smtp_conn.send_message(msg)
+                except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,
+                        OSError) as conn_err:
+                    # One socket for up to daily_limit sends, with no recovery,
+                    # meant a single mid-run disconnect failed every remaining
+                    # contact. Those got written to the failed log, which
+                    # check_and_sync_bounces dedupes against -- so they were
+                    # never retried and showed on the dashboard as bounces.
+                    # A transport drop says nothing about the address, so
+                    # reconnect once and retry before calling it a failure.
+                    print(f"         SMTP dropped ({conn_err}); reconnecting…")
+                    try:
+                        smtp_conn.quit()
+                    except Exception:
+                        pass
+                    smtp_conn = smtp_connect()
+                    smtp_conn.send_message(msg)
                 record_sent(log, email_addr, company)
                 sent_this_run.append(contact)
                 save_log(
