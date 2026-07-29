@@ -2,8 +2,9 @@
 """
 Cold Mail Sender
 ----------------
-Reads contacts from turso-full.db, sends up to 20 cold emails per day
-via Gmail SMTP, tracks sent emails in sent_log.json, and attaches a resume.
+Reads contacts from turso-full.db, sends cold emails via Gmail SMTP up to
+CONFIG["daily_limit"] per day, tracks sent emails in sent_log.json, and
+attaches a resume.
 
 Setup:
   1. Fill in CONFIG below (your Gmail, app password, resume path)
@@ -62,7 +63,20 @@ CONFIG = {
     "log_path": "sent_log.json",
     "daily_limit": 100,
     "tracker_url": _os.environ.get("TRACKER_URL", ""),
+    "tracker_secret": _os.environ.get("TRACKER_SECRET", ""),
 }
+
+
+def tracker_headers(cfg: dict, content_type: str = "") -> dict:
+    """Auth header for the tracker's private endpoints. Must match the
+    TRACKER_SECRET set on the Render service, or those routes return 401."""
+    headers = {}
+    if content_type:
+        headers["Content-Type"] = content_type
+    secret = cfg.get("tracker_secret", "")
+    if secret:
+        headers["X-Tracker-Key"] = secret
+    return headers
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PERSONALIZED EMAILS
@@ -149,7 +163,7 @@ Resources:
         "subject": "Internship Opportunity – Fyora AI",
         "body": """Fyora AI's direction in autonomous AI agents - handling multi-step workflow orchestration, real-time monitoring, and data aggregation - is where serious enterprise automation is headed. The in-office, product-first environment in New Delhi is exactly the kind of setup I'm looking for.
 
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I built Pulse - a collaboration platform handling 3K+ tasks across teams, with Groq AI-powered standup generation. The backend is Node/Express with PostgreSQL (14 REST endpoints, JWT auth, rate limiting) and the frontend is React with reusable component architecture. I'm also experienced with MongoDB from building Student Helper.
+I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I built Pulse - a collaboration platform with role-based workspaces and Groq AI-powered standup generation. The backend is Node/Express with PostgreSQL (14 REST endpoints, JWT auth, rate limiting) and the frontend is React with reusable component architecture. I'm also experienced with MongoDB from building Student Helper.
 
 Your stack - React, Next.js, Django, MongoDB - maps closely to my day-to-day. I'd be excited to contribute to Fyora AI's roadmap.
 
@@ -191,7 +205,7 @@ Resources:
 
 I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-I built Pulse, which handles 3K+ tasks across teams and integrates Groq AI for real-time standup generation. Wiring up AI APIs, managing async operations, and delivering results cleanly is core to what Pitchline does.
+I built Pulse, a team workspace platform that integrates Groq AI for standup generation. Wiring up AI APIs, managing async operations, and delivering results cleanly is core to what Pitchline does.
 
 Resources:
 • Portfolio: https://arnav24.tech
@@ -204,7 +218,7 @@ Resources:
 
 I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-I built Lucent FinTech - a finance dashboard tracking 200+ stocks in real time via Finnhub and MarketStack, with custom visualizations and optimized caching. The kind of data handling and UI complexity that data platforms demand.
+I built Lucent FinTech - a finance dashboard tracking stocks in real time via Finnhub and MarketStack, with custom visualizations and optimized caching. The kind of data handling and UI complexity that data platforms demand.
 
 Resources:
 • Portfolio: https://arnav24.tech
@@ -243,7 +257,7 @@ Resources:
 
 I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-I built Pulse, which handles 3K+ tasks across teams and integrates Groq AI for intelligent standup generation. Understanding how to architect AI features end-to-end, from prompt engineering to UI presentation, is core to my expertise.
+I built Pulse, a team workspace platform that integrates Groq AI for standup generation. Understanding how to architect AI features end-to-end, from prompt engineering to UI presentation, is core to my expertise.
 
 Resources:
 • Portfolio: https://arnav24.tech
@@ -256,7 +270,7 @@ Resources:
 
 I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-I built Pulse - a platform managing 3K+ tasks across teams with AI-generated standup summaries and role-based workflows. The same end-to-end thinking applies to business automation.
+I built Pulse - a platform with AI-generated standup summaries and role-based workflows. The same end-to-end thinking applies to business automation.
 
 Resources:
 • Portfolio: https://arnav24.tech
@@ -282,7 +296,7 @@ Resources:
 
 I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-I built Lucent FinTech, which tracks 200+ stocks and crypto assets in real time and integrates Gemini AI for financial insights. Combining full-stack development with AI integration is where I'm headed.
+I built Lucent FinTech, which tracks stocks and crypto assets in real time and integrates Gemini AI for financial insights. Combining full-stack development with AI integration is where I'm headed.
 
 Resources:
 • Portfolio: https://arnav24.tech
@@ -420,7 +434,9 @@ def sync_tracker_from_logs(cfg: dict):
 
     # 1. Download current opens from Render to back them up locally
     try:
-        req = urllib.request.Request(f"{tracker_url}/api/stats", method="GET")
+        req = urllib.request.Request(
+            f"{tracker_url}/api/stats", headers=tracker_headers(cfg), method="GET"
+        )
         with urllib.request.urlopen(req, timeout=10) as resp:
             server_opens = _json.loads(resp.read())
 
@@ -490,7 +506,7 @@ def sync_tracker_from_logs(cfg: dict):
         req = urllib.request.Request(
             f"{tracker_url}/api/bulk_sync",
             data=payload,
-            headers={"Content-Type": "application/json"},
+            headers=tracker_headers(cfg, "application/json"),
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -951,7 +967,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
                     req = _urllib.Request(
                         f"{tracker_url}/api/log_bounce",
                         data=payload,
-                        headers={"Content-Type": "application/json"},
+                        headers=tracker_headers(cfg, "application/json"),
                         method="POST",
                     )
                     with _urllib.urlopen(req, timeout=8):
@@ -1239,7 +1255,7 @@ def main():
                             data=_json.dumps(
                                 {"email": email_addr, "company": company}
                             ).encode("utf-8"),
-                            headers={"Content-Type": "application/json"},
+                            headers=tracker_headers(cfg, "application/json"),
                             method="POST",
                         )
                         with _urllib.urlopen(req, timeout=5) as resp:

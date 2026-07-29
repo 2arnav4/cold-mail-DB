@@ -1,13 +1,55 @@
 import os
 import io
+import hmac
 import base64
 import sqlite3
 from datetime import datetime
-from flask import Flask, request, send_file, jsonify, render_template_string, redirect
+from functools import wraps
+from flask import (
+    Flask, request, send_file, jsonify, render_template_string, redirect,
+    make_response,
+)
 
 app = Flask(__name__)
 
 DB_PATH = os.environ.get("DB_PATH", "/tmp/tracker.db")
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+# Everything that reads or writes contact rows sits behind a shared secret.
+# The tracking endpoints (/t/*.gif and /c/*) are deliberately NOT gated: they
+# are fetched by the recipient's mail client, which has no key and never will.
+TRACKER_SECRET = os.environ.get("TRACKER_SECRET", "")
+AUTH_COOKIE = "tracker_key"
+
+
+def _presented_key() -> str:
+    """Header first (scripts), then query string (first browser visit), then cookie."""
+    return (
+        request.headers.get("X-Tracker-Key")
+        or request.args.get("key")
+        or request.cookies.get(AUTH_COOKIE)
+        or ""
+    )
+
+
+def require_auth(view):
+    """Gate a route behind TRACKER_SECRET.
+
+    Fails closed on purpose: with no TRACKER_SECRET configured the route locks
+    instead of opening. An unset variable is a misconfiguration, and the wrong
+    way to resolve it is to serve 1,600 people's addresses to anonymous callers.
+    """
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not TRACKER_SECRET:
+            return jsonify({
+                "error": "Tracker is locked. Set the TRACKER_SECRET environment "
+                         "variable on the server to enable this endpoint."
+            }), 503
+        if not hmac.compare_digest(_presented_key(), TRACKER_SECRET):
+            return jsonify({"error": "Unauthorized"}), 401
+        return view(*args, **kwargs)
+    return wrapper
 
 # ── 1×1 transparent GIF ──────────────────────────────────────────────────────
 PIXEL = (
@@ -161,6 +203,7 @@ def classify_bot(user_agent: str, seconds_since_send: float) -> bool:
 
 # ── Log a sent email ──────────────────────────────────────────────────────────
 @app.route("/api/log_send", methods=["POST"])
+@require_auth
 def log_send():
     data = request.get_json() or {}
     email = data.get("email")
@@ -185,6 +228,7 @@ def log_send():
 
 # ── Log a bounced email ───────────────────────────────────────────────────────
 @app.route("/api/log_bounce", methods=["POST"])
+@require_auth
 def log_bounce():
     data = request.get_json() or {}
     email = data.get("email")
@@ -218,6 +262,7 @@ def log_bounce():
 
 # ── Bulk sync ─────────────────────────────────────────────────────────────────
 @app.route("/api/bulk_sync", methods=["POST"])
+@require_auth
 def bulk_sync():
     data = request.get_json() or {}
     sends = data.get("sends", [])
@@ -297,6 +342,7 @@ def bulk_sync():
 
 # ── Purge specific emails (e.g. rows synced in by mistake) ──────────────────
 @app.route("/api/purge", methods=["POST"])
+@require_auth
 def purge():
     data = request.get_json() or {}
     emails = [e.lower() for e in data.get("emails", []) if e]
@@ -320,6 +366,7 @@ def purge():
 #    logic (e.g. after a classifier change, so historical rows aren't stuck
 #    with a verdict made under the old rules) ─────────────────────────────────
 @app.route("/api/recompute_bot", methods=["POST"])
+@require_auth
 def recompute_bot():
     try:
         changed = {"opens": 0, "clicks": 0}
@@ -686,6 +733,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
 
 @app.route("/stats")
+@require_auth
 def stats():
     with get_db() as conn:
         # "Sent" here means real attempts -- sent successfully or bounced.
@@ -756,7 +804,7 @@ def stats():
         else 0
     )
 
-    return render_template_string(
+    resp = make_response(render_template_string(
         DASHBOARD,
         total_sent=total_sent,
         total_skipped=total_skipped,
@@ -774,10 +822,22 @@ def stats():
         bounce_rate=bounce_rate,
         open_rate=open_rate,
         outreach=outreach,
-    )
+    ))
+    # Remember the key so the dashboard survives a plain refresh without ?key=
+    # sitting in the address bar (and in browser history) on every load.
+    if request.args.get("key"):
+        resp.set_cookie(
+            AUTH_COOKIE, request.args["key"],
+            httponly=True, secure=True, samesite="Lax", max_age=60 * 60 * 24 * 30,
+        )
+    # The dashboard lists contact rows. Keep it out of caches and crawlers.
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
 
 
 @app.route("/api/stats")
+@require_auth
 def api_stats():
     with get_db() as conn:
         rows = conn.execute(
@@ -788,7 +848,7 @@ def api_stats():
 
 @app.route("/")
 def index():
-    return "Cold Mail Tracker ✅ — visit /stats for dashboard"
+    return "Cold Mail Tracker ✅"
 
 
 init_db()
