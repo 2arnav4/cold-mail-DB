@@ -33,9 +33,17 @@ import dns.resolver
 
 INTER_CALL_DELAY = 0.3
 
+# The domain half deliberately allows any number of labels. An earlier version
+# was `[\w\-]+\.[a-z]{2,}`, which permits exactly one dot and therefore rejected
+# every `.co.in`, `.co.uk` and subdomain address as "invalid syntax" -- without
+# issuing a single DNS or SMTP query. On India-focused outreach that is not an
+# edge case, and because a syntax failure returns False rather than None those
+# contacts were discarded permanently instead of held back.
+EMAIL_SYNTAX_RE = re.compile(r'^[\w.+\-]+@[\w\-]+(\.[\w\-]+)*\.[a-z]{2,}$', re.I)
+
 
 def verify_local(email: str) -> bool:
-    if not re.match(r'^[\w\.\+\-]+@[\w\-]+\.[a-z]{2,}$', email, re.I):
+    if not EMAIL_SYNTAX_RE.match(email):
         print(f"  [Validation] Invalid syntax: {email}")
         return False
 
