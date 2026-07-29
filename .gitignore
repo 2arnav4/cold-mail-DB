@@ -3,10 +3,17 @@ sent_log.json
 sent_log_failed.json
 sent_log_bounce_state.json
 *.db
+# Timestamped copies do not match *.db and carry the same contact rows.
+*.db.backup*
+*.db.bak
 __pycache__/
 *.pyc
 *.pyo
 .env
+
+# ── Virtualenvs ───────────────────────────────────────────────────────────────
+venv/
+.venv/
 
 # ── PDFs (personal) ──────────────────────────────────────────────────────────
 *.pdf

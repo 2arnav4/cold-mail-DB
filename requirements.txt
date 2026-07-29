@@ -1,0 +1,7 @@
+# Sender and verifier. Everything else they use is stdlib (smtplib, imaplib,
+# sqlite3, email, urllib), and .env is read by _load_env in send_emails.py
+# rather than python-dotenv.
+dnspython>=2.6.0
+
+# The tracker service installs separately from tracker/requirements.txt.
+# The scraper installs separately from requirements_scraper.txt.
