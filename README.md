@@ -66,11 +66,24 @@ and does not double count a bounce against a daily quota.
 SQLite on a persistent disk.
 
 - `/t/<encoded>.gif` returns a 1x1 pixel and records an open
-- `/c/<encoded>` records a click and redirects to the real destination
+- `/c/<encoded>.<sig>` records a click and redirects to the real destination
 
 Both are deliberately unauthenticated, because the client fetching them is the
 recipient's mail client and it will never have a key. Everything else, including
 the dashboard and every write endpoint, requires `TRACKER_SECRET`.
+
+That has two consequences worth being explicit about.
+
+**Neither endpoint may create rows.** They record against a recipient that
+already exists in `sends` and ignore anything else. Otherwise a crafted
+`/t/<base64>.gif` would let anyone append to the sends table, and `total_sent`
+is the denominator of both the open rate and the bounce rate.
+
+**The click payload carries its own redirect target**, so it is signed with a
+truncated HMAC over the encoded payload, keyed on `TRACKER_SECRET`. Without
+that, `/c/` is an open redirect: anyone could base64 their own destination and
+borrow the tracker's hostname to point at it. The sender refuses to wrap links
+at all when no secret is configured — no click tracking beats an unsigned one.
 
 Open tracking lies more than people admit. Apple Mail Privacy Protection
 preloads remote images, and corporate scanners like `OutlookSafeLinksScanner`
@@ -111,6 +124,12 @@ python3 send_emails.py             # send, up to CONFIG["daily_limit"]
 The tracker deploys separately from `render.yaml`. Set `TRACKER_SECRET` in the
 service environment to the same value as your local `.env`, or every write from
 the sender returns 401 and the dashboard stays locked.
+
+`TRACKER_SECRET` is not optional and is not just for the dashboard. It also keys
+the click-link HMAC, so the two sides must hold the identical value: a mismatch
+means every click redirect is rejected as forged. If the variable is missing on
+the server the gated routes return 503 rather than 401, which is the quickest
+way to tell "never configured" apart from "configured, wrong key".
 
 ## Files
 

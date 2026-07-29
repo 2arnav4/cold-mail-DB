@@ -3,7 +3,8 @@ import io
 import hmac
 import base64
 import sqlite3
-from datetime import datetime
+from contextlib import closing
+from datetime import datetime, timezone
 from functools import wraps
 from flask import (
     Flask, request, send_file, jsonify, render_template_string, redirect,
@@ -60,14 +61,28 @@ PIXEL = (
 )
 
 
+def utc_stamp() -> str:
+    """Current UTC as 'YYYY-MM-DD HH:MM:SS'. datetime.utcnow() is deprecated
+    from Python 3.12; the stored format is unchanged so existing rows and the
+    dashboard's `new Date(utc + 'Z')` parsing keep working."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def get_db():
+    """Always use as `with closing(get_db()) as conn:`.
+
+    sqlite3.Connection's own context manager is a TRANSACTION manager -- it
+    commits or rolls back on exit and never closes. Using `with get_db()` alone
+    therefore leaked one connection per request, which on a long-lived gunicorn
+    worker is steady file-descriptor growth. closing() is what actually shuts
+    it; the inner `with conn:` still handles the transaction."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db():
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS opens (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,17 +136,27 @@ def init_db():
 
         # Clean up fake bounces from local code compilation crashes
         conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
-        # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
+        # Delete false opens for HARD-bounced emails only (e.g. the sender
+        # opening the mailer-daemon notification). Restricted to hard bounces
+        # deliberately: this used to match every bounced row, so a soft bounce
+        # -- a full mailbox, a rate limit -- destroyed genuine human opens that
+        # had already been recorded against a mailbox that really does exist.
         conn.execute(
-            "DELETE FROM opens WHERE LOWER(email) IN (SELECT LOWER(email) FROM sends WHERE status='bounced')"
+            "DELETE FROM opens WHERE LOWER(email) IN "
+            "(SELECT LOWER(email) FROM sends WHERE status='bounced' AND bounce_type='hard')"
         )
-        conn.commit()
+
+        # The dashboard runs six correlated subqueries per send row against
+        # these two columns; without indexes that is a full scan each time.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_opens_email  ON opens(email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_clicks_email ON clicks(email)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sends_status ON sends(status)")
 
 
 # ── Keep-alive ping ───────────────────────────────────────────────────────────
 @app.route("/ping")
 def ping():
-    return jsonify({"status": "ok", "ts": datetime.utcnow().isoformat()}), 200
+    return jsonify({"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}), 200
 
 
 ALWAYS_BOT_UA_SUBSTRINGS = [
@@ -208,11 +233,11 @@ def log_send():
     data = request.get_json() or {}
     email = data.get("email")
     company = data.get("company", "")
-    sent_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    sent_at = utc_stamp()
     if not email:
         return jsonify({"error": "Missing email"}), 400
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             conn.execute(
                 "INSERT INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
                 "VALUES (?, ?, ?, 'sent', '', '', '') "
@@ -220,7 +245,6 @@ def log_send():
                 "status='sent', bounce_reason='', bounce_type='', retry_after=''",
                 (email, company, sent_at),
             )
-            conn.commit()
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -238,7 +262,7 @@ def log_bounce():
     if not email:
         return jsonify({"error": "Missing email"}), 400
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             conn.execute(
                 "UPDATE sends SET status='bounced', bounce_reason=?, bounce_type=?, retry_after=? WHERE email=?",
                 (reason, bounce_type, retry_after, email),
@@ -251,10 +275,9 @@ def log_bounce():
                     reason,
                     bounce_type,
                     retry_after,
-                    datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    utc_stamp(),
                 ),
             )
-            conn.commit()
         return jsonify({"status": "success"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -270,7 +293,7 @@ def bulk_sync():
     skips = data.get("skips", [])
     opens = data.get("opens", [])
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             for s in sends:
                 conn.execute(
                     "INSERT OR IGNORE INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
@@ -325,9 +348,11 @@ def bulk_sync():
                 )
             # Clean up fake bounces from local code compilation crashes
             conn.execute("DELETE FROM sends WHERE bounce_reason LIKE '%not defined%'")
-            # Delete any false opens for bounced emails (e.g. sender opening bounce notifications)
-            conn.execute("DELETE FROM opens WHERE LOWER(email) IN (SELECT LOWER(email) FROM sends WHERE status='bounced')")
-            conn.commit()
+            # Hard bounces only -- see the note in init_db.
+            conn.execute(
+                "DELETE FROM opens WHERE LOWER(email) IN "
+                "(SELECT LOWER(email) FROM sends WHERE status='bounced' AND bounce_type='hard')"
+            )
         return jsonify(
             {
                 "synced_sends": len(sends),
@@ -349,14 +374,13 @@ def purge():
     if not emails:
         return jsonify({"error": "Missing emails"}), 400
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             placeholders = ",".join("?" * len(emails))
             for table in ("sends", "opens", "clicks"):
                 conn.execute(
                     f"DELETE FROM {table} WHERE LOWER(email) IN ({placeholders})",
                     emails,
                 )
-            conn.commit()
         return jsonify({"purged": emails}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -370,7 +394,7 @@ def purge():
 def recompute_bot():
     try:
         changed = {"opens": 0, "clicks": 0}
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             sent_at_by_email = {
                 row["email"]: row["sent_at"]
                 for row in conn.execute("SELECT email, sent_at FROM sends").fetchall()
@@ -395,7 +419,6 @@ def recompute_bot():
                             f"UPDATE {table} SET is_bot=? WHERE id=?", (new_is_bot, row["id"])
                         )
                         changed[table] += 1
-            conn.commit()
         return jsonify({"reclassified": changed}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -415,17 +438,17 @@ def track(encoded):
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
     ua = request.headers.get("User-Agent", "")
-    opened_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    opened_at = utc_stamp()
 
     seconds_since_send = None
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             row = conn.execute(
                 "SELECT sent_at FROM sends WHERE email = ?", (email,)
             ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
-                now_dt = datetime.utcnow()
+                now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
                 seconds_since_send = (now_dt - sent_dt).total_seconds()
     except Exception as e:
         print(f"Error calculating seconds_since_send: {e}")
@@ -433,16 +456,25 @@ def track(encoded):
     is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
 
     try:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO sends (email, company, sent_at) VALUES (?, ?, ?)",
-                (email, company, opened_at),
-            )
-            conn.execute(
-                "INSERT INTO opens (email, company, opened_at, ip, user_agent, is_bot) VALUES (?,?,?,?,?,?)",
-                (email, company, opened_at, ip, ua, is_bot),
-            )
-            conn.commit()
+        with closing(get_db()) as conn, conn:
+            # An open is only recorded against a send that exists. This used to
+            # `INSERT OR IGNORE INTO sends` first, inventing a row with
+            # opened_at as sent_at and the default status 'sent'. Because /t/ is
+            # necessarily unauthenticated, that let anyone who base64s
+            # "anything@example.com|Acme" and requests the URL append rows to
+            # `sends` -- inflating total_sent, which is the denominator of both
+            # the open rate and the bounce rate.
+            known = conn.execute(
+                "SELECT 1 FROM sends WHERE email = ?", (email,)
+            ).fetchone()
+            if not known:
+                print(f"Ignoring pixel hit for unknown recipient: {email!r}")
+            else:
+                conn.execute(
+                    "INSERT OR IGNORE INTO opens (email, company, opened_at, ip, user_agent, is_bot) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (email, company, opened_at, ip, ua, is_bot),
+                )
     except Exception as e:
         print(f"DB error: {e}")
 
@@ -450,19 +482,44 @@ def track(encoded):
 
 
 # ── Link click tracking ───────────────────────────────────────────────────────
+def verify_click_signature(encoded: str, presented: str) -> bool:
+    """Recompute the sender's HMAC over the payload. Must match before we honour
+    the redirect target, otherwise /c/ is an open redirect: the destination is
+    attacker-supplied base64 on an endpoint that cannot require auth."""
+    import hashlib
+
+    if not TRACKER_SECRET or not presented:
+        return False
+    expected = hmac.new(
+        TRACKER_SECRET.encode(), encoded.encode(), hashlib.sha256
+    ).hexdigest()[:16]
+    return hmac.compare_digest(expected, presented)
+
+
 @app.route("/c/<path:encoded>")
 def click(encoded):
+    # Links are emitted as /c/<base64>.<sig>; anything else is unsigned.
+    payload, _, signature = encoded.rpartition(".")
+    if not payload:
+        payload, signature = encoded, ""
+
     try:
-        padding = 4 - len(encoded) % 4
-        decoded = base64.urlsafe_b64decode(encoded + "=" * padding).decode()
+        padding = 4 - len(payload) % 4
+        decoded = base64.urlsafe_b64decode(payload + "=" * padding).decode()
         parts = decoded.split("|", 2)
         email = parts[0]
         company = parts[1] if len(parts) > 1 else ""
         target_url = parts[2] if len(parts) > 2 else ""
     except Exception:
-        email, company, target_url = "unknown", "", "/"
+        email, company, target_url = "unknown", "", ""
 
-    if not target_url:
+    if not verify_click_signature(payload, signature):
+        # Refuse to forward to an unverified destination. Send them somewhere
+        # harmless rather than reflecting whatever the URL asked for.
+        print(f"Rejecting unsigned/forged click payload: {encoded!r}")
+        return redirect("/", code=302)
+
+    if not target_url or not target_url.startswith(("http://", "https://")):
         target_url = "/"
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
@@ -470,28 +527,35 @@ def click(encoded):
 
     seconds_since_send = None
     try:
-        with get_db() as conn:
+        with closing(get_db()) as conn, conn:
             row = conn.execute(
                 "SELECT sent_at FROM sends WHERE email = ?", (email,)
             ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
-                now_dt = datetime.utcnow()
+                now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
                 seconds_since_send = (now_dt - sent_dt).total_seconds()
     except Exception as e:
         print(f"Error calculating seconds_since_send for click: {e}")
 
     is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
-    clicked_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    clicked_at = utc_stamp()
 
     try:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO clicks (email, company, clicked_at, ip, user_agent, is_bot, target_url) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (email, company, clicked_at, ip, ua, is_bot, target_url),
-            )
-            conn.commit()
+        with closing(get_db()) as conn, conn:
+            # Same rule as the pixel: only record against a send we know about,
+            # so an unauthenticated endpoint can't grow the sends table.
+            known = conn.execute(
+                "SELECT 1 FROM sends WHERE email = ?", (email,)
+            ).fetchone()
+            if known:
+                conn.execute(
+                    "INSERT INTO clicks (email, company, clicked_at, ip, user_agent, is_bot, target_url) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (email, company, clicked_at, ip, ua, is_bot, target_url),
+                )
+            else:
+                print(f"Ignoring click for unknown recipient: {email!r}")
     except Exception as e:
         print(f"DB error logging click: {e}")
 
@@ -735,7 +799,7 @@ document.addEventListener("DOMContentLoaded", function() {
 @app.route("/stats")
 @require_auth
 def stats():
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         # "Sent" here means real attempts -- sent successfully or bounced.
         # Skipped rows were never actually sent, so they're excluded and
         # reported separately.
@@ -839,7 +903,7 @@ def stats():
 @app.route("/api/stats")
 @require_auth
 def api_stats():
-    with get_db() as conn:
+    with closing(get_db()) as conn, conn:
         rows = conn.execute(
             "SELECT email, company, opened_at, ip, user_agent, is_bot FROM opens ORDER BY opened_at DESC"
         ).fetchall()
