@@ -132,6 +132,18 @@ def classify_rejection(message) -> bool | None:
 
 def verify_smtp(email: str) -> bool | None:
     """Direct SMTP RCPT TO probe."""
+    # SMTP commands are ASCII unless both ends negotiate SMTPUTF8 (RFC 6531).
+    # smtplib encodes commands with command_encoding, which defaults to ascii,
+    # so `server.rcpt("kristóf@turbine.ai")` raises UnicodeEncodeError from deep
+    # inside putcmd -- uncaught, that killed an entire send run on the first
+    # contact. Hold these back rather than probing: unverifiable is honest here,
+    # and it is emphatically not the same as invalid.
+    try:
+        email.encode("ascii")
+    except UnicodeEncodeError:
+        print(f"  [SMTP] non-ASCII address, cannot probe over plain SMTP: {email}")
+        return None
+
     domain = email.split('@')[1]
     try:
         records = sorted(dns.resolver.resolve(domain, 'MX'), key=lambda r: r.preference)
@@ -156,6 +168,12 @@ def verify_smtp(email: str) -> bool | None:
         return None
     except (smtplib.SMTPException, socket.timeout, OSError) as e:
         print(f"  [SMTP] connection to {mx_host} failed: {e}")
+        return None
+    except UnicodeError as e:
+        # Belt and braces: a non-ASCII byte can still reach smtplib via a server
+        # reply or an IDN hostname. Never let an encoding problem read as a
+        # verdict about the address.
+        print(f"  [SMTP] encoding error probing {email}: {e}")
         return None
     finally:
         if server:

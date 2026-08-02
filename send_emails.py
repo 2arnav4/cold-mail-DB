@@ -1520,7 +1520,15 @@ def main():
             print(f"  [{progress}] {email_addr:40s} | {company} | {role}")
 
             if not dry_run:
-                is_valid, checked_by = verify_email(email_addr)
+                try:
+                    is_valid, checked_by = verify_email(email_addr)
+                except Exception as ver_err:
+                    # Verification is a best-effort side check, never a reason to
+                    # abort the run. A UnicodeEncodeError on one accented address
+                    # used to take down the whole batch on contact 1 of 15.
+                    # Unknown verdict means hold back, so nothing is discarded.
+                    print(f"         Verifier crashed ({type(ver_err).__name__}: {ver_err}). Holding back.")
+                    is_valid, checked_by = None, "verifier_error"
                 # contact_id is None for CSV-sourced rows -- there is no database
                 # row behind them, so record the outcome but skip the DB writes.
                 from_db = contact.get("contact_id") is not None
