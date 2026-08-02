@@ -1,0 +1,6 @@
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
+groq>=0.9.0
+python-dotenv>=1.0.0
+dnspython>=2.6.0
