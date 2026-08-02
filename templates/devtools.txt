@@ -1,0 +1,20 @@
+Subject: Built an SMTP verifier in Go, want to build more
+
+Hi {{first_name}},
+
+Developer tools are one of the few categories where the users read your source. That raises the bar in a way I want to work against.
+
+I'm a third-year CSE student in Delhi. Most recently I wrote an email verifier in Go with no third-party dependencies: DNS MX resolution, raw SMTP RCPT probing with connection deadlines, catch-all detection, and a worker pool. The interesting part was error classification, telling a dead mailbox apart from a server refusing your IP, because getting that wrong deletes live data.
+
+Before that I built Pulse on Node/Express: 14 REST endpoints, JWT auth, rate limiting, Postgres.
+
+Happy to start on whatever is unglamorous. Tests, docs, the CLI nobody wants to own.
+
+Resources:
+• GitHub: https://github.com/2arnav4
+• Pulse: https://pulse-nu-liard.vercel.app/
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav

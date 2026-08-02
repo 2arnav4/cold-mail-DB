@@ -1,0 +1,20 @@
+Subject: Wrong answers cost more here
+
+Hi {{first_name}},
+
+Health software has a property most software doesn't. Being confidently wrong is worse than being slow, and a lot of engineering habits do not transfer cleanly.
+
+I'm a third-year CSE student in Delhi. The most useful thing I've built recently is a verification pipeline where the hardest decision was what to do when the system cannot get a confident answer. I made it hold back rather than guess, because guessing meant destroying records that were actually fine.
+
+Stack: React/Next.js and TypeScript, Node/Express, Postgres and Mongo, plus Go.
+
+Happy to start anywhere, including the parts that are mostly reading specs.
+
+Resources:
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+• Pulse: https://pulse-nu-liard.vercel.app/
+
+Resume attached.
+
+Arnav

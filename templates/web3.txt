@@ -1,0 +1,18 @@
+Subject: Solana, Rust, and a finance dashboard
+
+Hi {{first_name}},
+
+Onchain work has a constraint I like. You cannot patch your way out of a bad deploy, so the thinking has to happen first.
+
+I'm a third-year CSE student in Delhi. I write Rust for Solana, and I built Lucent, a dashboard tracking 200+ stocks and crypto assets live across three APIs that regularly disagree with each other. Deciding what to show when your sources conflict is a smaller version of a problem this space has constantly.
+
+Also React/Next.js and TypeScript, Node/Express, Postgres, and Go.
+
+Resources:
+• Lucent: https://lucent-fintech-psi.vercel.app/
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav

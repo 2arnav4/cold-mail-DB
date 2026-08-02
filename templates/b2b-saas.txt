@@ -1,0 +1,18 @@
+Subject: The unglamorous half of {{company}}
+
+Hi {{first_name}},
+
+Most B2B products live or die on the parts that never make the landing page. Permissions, retries, the job that has to be idempotent because someone will double-click.
+
+I'm a third-year CSE student in Delhi. I built Pulse, a collaborative platform handling 3,000+ tasks across teams: 14 REST endpoints on Node/Express, JWT auth, rate limiting, Postgres, and Groq for generating standups. I also run a cold outreach pipeline of my own with a Go verifier and a Flask tracker, which is where I learned what happens when your data model is wrong at 5,000 rows.
+
+React/Next.js and TypeScript on the front end.
+
+Resources:
+• Pulse: https://pulse-nu-liard.vercel.app/
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav

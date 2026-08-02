@@ -364,6 +364,7 @@ CONTACT_QUERY = """
         co.name      AS company_name,
         co.domain    AS company_domain,
         co.industry  AS company_industry,
+        co.sector    AS company_sector,
         co.funding_stage AS funding_stage
     FROM contacts ct
     JOIN companies co ON ct.company_id = co.id
@@ -620,6 +621,47 @@ def load_template(template_path: str) -> tuple:
 
     body = "\n".join(lines[body_start:])
     return subject, body
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Sector templates
+#
+#  companies.sector is set by classify_companies.py. Each sector gets a template
+#  in templates/<sector>.txt that references the projects actually relevant to
+#  it -- Lucent for fintech, the Go verifier for devtools, Student Helper for
+#  consumer. Anything unclassified falls back to the generic template.txt, which
+#  is why an empty templates/ directory is not an error.
+#
+#  There is deliberately no ai-ml sector. Claiming ML experience Arnav does not
+#  have would read worse than a generic email.
+# ─────────────────────────────────────────────────────────────────────────────
+SECTOR_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+
+def load_sector_templates(directory: str = SECTOR_TEMPLATE_DIR) -> dict:
+    """Load templates/<sector>.txt into {sector: (subject, body)}."""
+    templates = {}
+    if not os.path.isdir(directory):
+        return templates
+    for filename in sorted(os.listdir(directory)):
+        if not filename.endswith(".txt"):
+            continue
+        sector = filename[: -len(".txt")]
+        subject, body = load_template(os.path.join(directory, filename))
+        if subject and body:
+            templates[sector] = (subject, body)
+        else:
+            print(f"  WARNING: templates/{filename} has no Subject: line, skipping")
+    return templates
+
+
+def pick_template(contact: dict, sector_templates: dict, fallback: tuple) -> tuple:
+    """Returns (subject, body, label). Label is for logging only."""
+    sector = (contact.get("company_sector") or "").strip().lower()
+    if sector and sector in sector_templates:
+        subject, body = sector_templates[sector]
+        return subject, body, f"[{sector.upper()}]"
+    return fallback[0], fallback[1], "[GENERIC]"
 
 
 def render(template: str, contact: dict) -> str:
@@ -1393,6 +1435,9 @@ def main():
         print(f"ERROR: Template file not found: {cfg['template_path']}")
         sys.exit(1)
     subject_template, body_template = load_template(cfg["template_path"])
+    sector_templates = load_sector_templates()
+    if sector_templates:
+        print(f"  Sector templates loaded: {', '.join(sorted(sector_templates))}")
     if not subject_template:
         print("ERROR: Template missing 'Subject:' line on the first line.")
         sys.exit(1)
@@ -1503,9 +1548,11 @@ def main():
                     body = personalized["body"]
                     mode_tag = "[PERSONALIZED]"
                 else:
-                    subject = render(subject_template, contact)
-                    body = render(body_template, contact)
-                    mode_tag = "[GENERIC TEMPLATE]"
+                    subj_t, body_t, mode_tag = pick_template(
+                        contact, sector_templates, (subject_template, body_template)
+                    )
+                    subject = render(subj_t, contact)
+                    body = render(body_t, contact)
                 print(f"         {mode_tag}")
                 print(f"         Subject : {subject}")
                 print(f"         Body preview: {body[:120].strip()}...")
@@ -1516,7 +1563,11 @@ def main():
                 continue
 
             try:
-                msg = build_email(cfg, contact, subject_template, body_template)
+                subj_t, body_t, mode_tag = pick_template(
+                    contact, sector_templates, (subject_template, body_template)
+                )
+                print(f"         {mode_tag}")
+                msg = build_email(cfg, contact, subj_t, body_t)
                 try:
                     smtp_conn.send_message(msg)
                 except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError,

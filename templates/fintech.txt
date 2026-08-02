@@ -1,0 +1,20 @@
+Subject: Three price APIs, three different answers
+
+Hi {{first_name}},
+
+In fintech the hard part is rarely the interface. It's that your sources disagree and you still have to show one number.
+
+I'm a third-year CSE student in Delhi. I built Lucent, a finance dashboard tracking 200+ stocks and crypto assets live off Finnhub, MarketStack and CoinMarketCap. Reconciling three APIs that regularly contradict each other, and deciding what to display when they do, taught me more about data correctness than any course did.
+
+React/TypeScript on the front, Node/Express and Postgres behind it. I also write Go.
+
+Happy to start on the parts nobody demos. Reconciliation, retries, audit trails.
+
+Resources:
+• Lucent: https://lucent-fintech-psi.vercel.app/
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav
