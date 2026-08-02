@@ -105,10 +105,12 @@ type Result struct {
 // An earlier Python version allowed exactly one dot and rejected every .co.in
 // address as bad syntax without issuing a single DNS or SMTP query.
 //
-// NOT a perfect mirror: Python's \w matches Unicode letters by default, Go's
-// regexp \w is ASCII-only [0-9A-Za-z_]. An address with a non-ASCII local part
-// passes in Python and fails here.
-var emailSyntax = regexp.MustCompile(`^[\w.+\-]+@[\w\-]+(\.[\w\-]+)*\.[a-zA-Z]{2,}$`)
+// \p{L}\p{N} rather than \w, because Go's \w is ASCII-only [0-9A-Za-z_] while
+// Python's is Unicode-aware by default. Using \w here rejected 24 live contacts
+// in the main database on a first run -- andrés@, benoît@, michał@, nebojša@ and
+// similar -- as "invalid syntax", without a single DNS query. Accented local
+// parts are ordinary in European contact lists, not an edge case.
+var emailSyntax = regexp.MustCompile(`^[\p{L}\p{N}_.+\-]+@[\p{L}\p{N}_\-]+(\.[\p{L}\p{N}_\-]+)*\.[a-zA-Z]{2,}$`)
 
 func validSyntax(email string) bool {
 	return emailSyntax.MatchString(email)
@@ -437,7 +439,7 @@ func main() {
 	if *from != "" && validSyntax(*from) {
 		smtpMailFrom = *from
 		smtpHeloDomain = domainOf(*from)
-	} else {
+	} else if !skipSMTP {
 		fmt.Fprintf(os.Stderr,
 			"[WARN] no valid -from address (and $GMAIL_ADDRESS unset); using %s, which does not\n"+
 				"       resolve. Expect widespread 450 sender-rejected and unknown verdicts.\n", smtpMailFrom)
