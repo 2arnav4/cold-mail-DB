@@ -25,5 +25,15 @@ bounce_scan.log
 sent_log_opens.json
 
 
+# ── Go build artifacts ────────────────────────────────────────────────────────
+# The compiled verifier is ~4.6MB and rebuilds with `go build`. Never commit it.
+verifier/verifier
+*.exe
+
+# ── Verifier output ───────────────────────────────────────────────────────────
+# CSVs written by `verifier -out` contain contact addresses.
+verify_results*.csv
+
 # Contact databases stay local. Personal data, never pushed.
 hr-database/
+data_sources/
