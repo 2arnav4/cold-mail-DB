@@ -1331,6 +1331,12 @@ def main():
     )
     parser.add_argument("--limit", type=int, help="Cap how many we send THIS run (never exceeds the daily quota)")
     parser.add_argument(
+        "--verified-csv",
+        metavar="PATH",
+        help="CSV from `verifier -out` (email,verdict,...). Addresses with "
+             "verdict=valid skip the live SMTP probe during this run.",
+    )
+    parser.add_argument(
         "--rate-per-hour",
         type=float,
         metavar="N",
@@ -1367,6 +1373,22 @@ def main():
     )
     args = parser.parse_args()
     dry_run = args.dry_run
+
+    # Addresses the Go verifier already confirmed deliverable. Only verdict
+    # "valid" is trusted -- "unknown" means we could not tell, which is exactly
+    # the case that still needs a live check.
+    pre_verified = set()
+    if args.verified_csv:
+        import csv as _csv
+        try:
+            with open(args.verified_csv) as f:
+                for row in _csv.DictReader(f):
+                    if row.get("verdict", "").strip().lower() == "valid":
+                        pre_verified.add(row["email"].strip().lower())
+            print(f"  Pre-verified addresses loaded: {len(pre_verified)}")
+        except Exception as e:
+            print(f"  WARNING: could not read {args.verified_csv}: {e}")
+
     # Seconds to wait between sends. 15/hour -> 240s. Zero in dry-run, where
     # nothing leaves the machine and pacing would only waste your time.
     send_interval = (
@@ -1521,7 +1543,18 @@ def main():
 
             if not dry_run:
                 try:
-                    is_valid, checked_by = verify_email(email_addr)
+                    # Addresses the Go verifier already confirmed are skipped
+                    # here. Re-probing them wastes a round trip, and at volume
+                    # Google starts answering 4.2.1 "receiving mail at a rate
+                    # that prevents additional messages" to EVERY probe from
+                    # this IP -- which reads as unverifiable and silently holds
+                    # back good contacts. One bulk verification pass should not
+                    # poison the send that follows it.
+                    if email_addr.lower() in pre_verified:
+                        is_valid, checked_by = True, "pre_verified"
+                        print(f"         pre-verified, skipping live probe")
+                    else:
+                        is_valid, checked_by = verify_email(email_addr)
                 except Exception as ver_err:
                     # Verification is a best-effort side check, never a reason to
                     # abort the run. A UnicodeEncodeError on one accented address

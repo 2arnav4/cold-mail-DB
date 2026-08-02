@@ -43,11 +43,15 @@ def sent_emails() -> set:
 
 
 def sort_key(row) -> tuple:
+    # "other" is a real classification but it routes to the generic template,
+    # so rank it below a matched sector and above no sector at all.
+    sector = (row["sector"] or "").lower()
+    sector_rank = 0 if sector and sector != "other" else (1 if sector else 2)
     return (
         VERDICT_RANK.get(row["verdict"], 9),
+        sector_rank,
         BATCH_RANK.get(row["batch"] or "", 8),
         STAGE_RANK.get((row["fs"] or "").lower(), 8),
-        0 if row["sector"] else 1,
         row["email"],
     )
 
@@ -95,7 +99,20 @@ def main():
         rows.append(d)
 
     rows.sort(key=sort_key)
-    chosen = rows[:top]
+
+    # One contact per company. These are mostly seed-stage startups with a
+    # handful of people; three founders at the same company receiving the same
+    # template on the same day reads as spam, and it burns three slots for one
+    # shot at one company.
+    chosen, seen_companies = [], set()
+    for r in rows:
+        key = (r["cname"] or r["email"].split("@")[-1]).strip().lower()
+        if key in seen_companies:
+            continue
+        seen_companies.add(key)
+        chosen.append(r)
+        if len(chosen) >= top:
+            break
 
     n_valid = sum(1 for r in chosen if r["verdict"] == "valid")
     print(f"candidates available : {len(rows)}  "
