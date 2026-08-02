@@ -22,6 +22,7 @@ not safe to send to either.
 
 Reusable by send_emails.py and scraper.py.
 """
+import os
 import re
 import time
 import random
@@ -65,8 +66,68 @@ def verify_local(email: str) -> bool:
 
 
 SMTP_TIMEOUT = 6
-SMTP_HELO_DOMAIN = "coldmaildb.local"
-SMTP_MAIL_FROM = "verify@coldmaildb.local"
+
+# These MUST resolve in public DNS. "coldmaildb.local" does not, so any server
+# that verifies the sender domain answers `450 4.1.8 Sender address rejected:
+# Domain not found` and the address comes back unverifiable for a reason that
+# has nothing to do with the address.
+SMTP_MAIL_FROM = os.environ.get("GMAIL_ADDRESS") or "verify@coldmaildb.local"
+SMTP_HELO_DOMAIN = SMTP_MAIL_FROM.split("@", 1)[-1]
+
+# RFC 3463 enhanced status code at the front of a reply, e.g. "5.7.1".
+ENHANCED_STATUS_RE = re.compile(rb"^\s*([245])\.(\d+)\.(\d+)")
+
+# Replies that are about US -- our IP, our sender domain, our reputation --
+# rather than about the recipient's mailbox.
+SENDER_SIDE_RE = re.compile(
+    rb"spamhaus|spamcop|barracuda|sorbs|dnsbl|\brbl\b|black-?list|block-?list"
+    rb"|blocked using|banned|reputation|not authori[sz]ed|access denied"
+    rb"|client host|helo|sender address rejected|domain not found"
+    rb"|service unavailable|too many|rate limit|try again|policy reasons",
+    re.I,
+)
+
+
+def classify_rejection(message) -> bool | None:
+    """Decide whether a permanent 5xx at RCPT TO means "this mailbox does not
+    exist" (False) or "this server refuses to talk to you" (None).
+
+    This distinction is the difference between correctly discarding a dead
+    address and wrongly deleting a live contact because our sending IP is on a
+    blocklist. Without it, every 550/551/553/554 mapped straight to False, and
+    `send_emails.py` calls `move_to_wrong_address()` on False -- so a single
+    blocklist listing quarantined working addresses in bulk. Verified: 550 5.7.1
+    "Client host blocked using Spamhaus" was being read as a dead mailbox.
+
+    Order:
+      1. Enhanced status: 5.1.x is addressing (bad mailbox) -> False.
+         5.7.x is policy/security, i.e. about the sender -> None.
+      2. Failing that, keyword match on known sender-side language -> None.
+      3. Otherwise assume it really is a bad mailbox -> False.
+    """
+    if isinstance(message, str):
+        message = message.encode("utf-8", "replace")
+
+    m = ENHANCED_STATUS_RE.match(message)
+    if m:
+        status_class, subject = m.group(1), m.group(2)
+        if status_class != b"5":
+            # 4.x.x is a TEMPORARY failure. Never permanent, whatever the
+            # subject digit says -- 4.1.8 is a rejected sender domain, not a
+            # dead mailbox.
+            print(f"  [SMTP] temporary {status_class.decode()}.x.x, holding back: {message[:90]!r}")
+            return None
+        if subject == b"1":         # 5.1.x -- bad destination mailbox
+            return False
+        if subject == b"7":         # 5.7.x -- policy/security: about us
+            print(f"  [SMTP] policy rejection, not a dead mailbox: {message[:90]!r}")
+            return None
+
+    if SENDER_SIDE_RE.search(message):
+        print(f"  [SMTP] sender-side rejection, not a dead mailbox: {message[:90]!r}")
+        return None
+
+    return False
 
 
 def verify_smtp(email: str) -> bool | None:
@@ -90,7 +151,7 @@ def verify_smtp(email: str) -> bool | None:
         if code == 250:
             return True
         if code in (550, 551, 553, 554):
-            return False
+            return classify_rejection(message)
         print(f"  [SMTP] inconclusive response {code}: {message}")
         return None
     except (smtplib.SMTPException, socket.timeout, OSError) as e:

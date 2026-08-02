@@ -22,6 +22,7 @@ import smtplib
 import json
 import os
 import sys
+import time
 import argparse
 from datetime import date, datetime, timezone
 from email.mime.multipart import MIMEMultipart
@@ -94,6 +95,42 @@ def tracker_headers(cfg: dict, content_type: str = "") -> dict:
 #  For any contact NOT in this dict, the generic template.txt is used.
 # ─────────────────────────────────────────────────────────────────────────────
 PERSONALIZED_EMAILS = {
+    "xinwei@traceroot.ai": {
+        "subject": "Your agent broke in prod. Now what?",
+        "body": """Hi Xinwei,
+
+Most agent tooling stops at a dashboard. Root-causing a failure against real source and GitHub history, then opening a PR that gets evaluated, is a much harder thing to build. That's why I'm writing.
+
+I'm a third-year CSE student in Delhi. I built Pulse: Node/Express, 14 REST endpoints, JWT auth, rate limiting, Postgres, Groq for standup generation. I also write Go and contribute to open source.
+
+TraceRoot is open source. I'd rather spend a summer shipping into a repo people read than an internal tool nobody sees.
+
+Resources:
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav""",
+    },
+    "sandeep@cairhealth.com": {
+        "subject": "Claims accuracy beats model fluency",
+        "body": """Hi Sandeep,
+
+Claims are high volume, the rules shift constantly, and one wrong answer costs real money. That makes accuracy a harder engineering problem than fluency, and most LLM tooling optimizes for the wrong one.
+
+I'm a third-year CSE student in Delhi. I built Lucent FinTech, pulling live data from Finnhub, MarketStack and CoinMarketCap. Reconciling three APIs that regularly disagree taught me more about data accuracy than any tutorial did.
+
+React/TypeScript, Node, Postgres, Mongo. Happy to start on the unglamorous parts of the pipeline.
+
+Resources:
+• GitHub: https://github.com/2arnav4
+• Portfolio: https://arnav24.tech
+
+Resume attached.
+
+Arnav""",
+    },
     "sean@relixir.ai": {
         "subject": "Internship Opportunity – Relixir",
         "body": """I've been following Relixir since the YC batch announcement. The pivot from traditional SEO to Generative Engine Optimization is the right call. As AI-driven search takes share from Google, brands that don't adapt now will be invisible in two years. The autonomous content publishing and GEO-optimized refresh cycle is a sharp product decision.
@@ -1252,6 +1289,13 @@ def main():
     )
     parser.add_argument("--limit", type=int, help="Cap how many we send THIS run (never exceeds the daily quota)")
     parser.add_argument(
+        "--rate-per-hour",
+        type=float,
+        metavar="N",
+        help="Spread sends evenly at N per hour (e.g. 15 sleeps 240s between sends). "
+             "Paces the run so it does not look like a burst. Ignored in --dry-run.",
+    )
+    parser.add_argument(
         "--daily-limit",
         type=int,
         help="Override cfg['daily_limit'] for this run only (lets today's send count exceed the normal cap)",
@@ -1281,6 +1325,13 @@ def main():
     )
     args = parser.parse_args()
     dry_run = args.dry_run
+    # Seconds to wait between sends. 15/hour -> 240s. Zero in dry-run, where
+    # nothing leaves the machine and pacing would only waste your time.
+    send_interval = (
+        3600.0 / args.rate_per_hour
+        if args.rate_per_hour and args.rate_per_hour > 0 and not dry_run
+        else 0.0
+    )
     cfg = CONFIG.copy()
 
     if args.daily_limit:
@@ -1511,6 +1562,15 @@ def main():
                         print(f"         Tracker API Log Warning: {te}")
 
                 print(f"         SENT")
+
+                # Pace the run. Gmail tolerates bursts, but recipient servers and
+                # spam filters treat a rapid identical-template burst from one
+                # sender as exactly what it looks like. Sleeping between sends
+                # spreads the run out; --rate-per-hour sets the pace.
+                if send_interval and len(sent_this_run) < quota_left:
+                    print(f"         waiting {send_interval:.0f}s (next at "
+                          f"{datetime.now().strftime('%H:%M:%S')} + {send_interval:.0f}s)")
+                    time.sleep(send_interval)
             except Exception as e:
                 print(f"         FAILED: {e}")
                 record_failed(cfg["log_path"], contact, e)  # Log to failed_log.json
