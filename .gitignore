@@ -39,3 +39,7 @@ hr-database/
 data_sources/
 # 63 real contact addresses are hardcoded in this script's source.
 add_new_hr_contacts.py
+
+# Local sqlite WAL sidecars
+*.db-shm
+*.db-wal
