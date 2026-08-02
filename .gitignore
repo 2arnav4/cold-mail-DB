@@ -37,3 +37,5 @@ verify_results*.csv
 # Contact databases stay local. Personal data, never pushed.
 hr-database/
 data_sources/
+# 63 real contact addresses are hardcoded in this script's source.
+add_new_hr_contacts.py
