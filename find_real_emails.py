@@ -31,6 +31,7 @@ Usage:
 """
 import argparse
 import concurrent.futures as futures
+import re
 import json
 import os
 import shutil
@@ -75,6 +76,65 @@ def ensure_columns(con):
     if added:
         con.commit()
         print("added columns:", ", ".join(added))
+
+
+# Company sites carry addresses that are not the company's: customer logos,
+# testimonials, integration docs, and copy-paste placeholder text. Scraping
+# orangeslice.ai yielded patrick@stripe.com, dylan@figma.com and
+# olivier@datadoghq.com -- real people at other companies. Mailing them a pitch
+# about Orange Slice would be considerably worse than a bounce.
+PLACEHOLDER_DOMAINS = {
+    "example.com", "example.org", "example.net", "test.com", "email.com",
+    "domain.com", "yourdomain.com", "yourbrand.com", "yourcompany.com",
+    "company.com", "acme.com", "acme.org", "acme.dev", "mail.com",
+    "sentry.io", "wixpress.com", "gmail.com", "googlemail.com",
+    "outlook.com", "hotmail.com", "yahoo.com", "sentry-next.wixpress.com",
+}
+PLACEHOLDER_LOCALS = {
+    "you", "user", "test", "name", "email", "yourname", "someone",
+    "firstname", "username", "example", "your", "no-reply", "noreply",
+}
+EMAIL_OK = re.compile(r"^[\w.+\-]+@[\w\-]+(\.[\w\-]+)*\.[a-zA-Z]{2,}$")
+
+
+def normalise(email: str) -> str:
+    """Trailing dots come straight off the page ('founders@convexia.bio.') and
+    a stored address with one will never match anything. The mailto: prefix
+    survives some malformed href attributes, and code samples on docs pages
+    contribute things like git@github.com and password@prod.db."""
+    return email.strip().lower().removeprefix("mailto:").strip(".,;:<>()[]\"'")
+
+
+def same_company(email_domain: str, company_domain: str) -> bool:
+    """True when the address plausibly belongs to this company.
+
+    Accepts exact matches, subdomains either way, and a shared leading label so
+    that mail.acme.com, acme.io and acme.co.uk all count as acme. Deliberately
+    strict: a false accept means emailing a stranger about someone else's
+    company, which is far more costly than a missed contact.
+    """
+    e = email_domain.lower().strip().rstrip(".").removeprefix("www.")
+    c = company_domain.lower().strip().rstrip(".").removeprefix("www.")
+    if not e or not c:
+        return False
+    if e == c or e.endswith("." + c) or c.endswith("." + e):
+        return True
+    e_core, c_core = e.split(".")[0], c.split(".")[0]
+    return len(e_core) > 3 and len(c_core) > 3 and (e_core in c_core or c_core in e_core)
+
+
+def acceptable(email: str, company_domain: str) -> tuple[bool, str]:
+    """Returns (keep, reason_if_rejected)."""
+    if not EMAIL_OK.match(email):
+        return False, "malformed"
+    local, _, domain = email.partition("@")
+    if domain in PLACEHOLDER_DOMAINS:
+        return False, "placeholder domain"
+    if local in PLACEHOLDER_LOCALS:
+        return False, "placeholder local part"
+    if not same_company(domain, company_domain):
+        return False, f"belongs to {domain}, not {company_domain}"
+    return True, ""
 
 
 def guess_role(name_hint: str, email: str) -> str | None:
@@ -160,8 +220,9 @@ def main():
     already = sent_emails()
     existing = {(r[0] or "").lower() for r in con.execute("SELECT email FROM contacts")}
     now = datetime.now().isoformat()
-    inserted = personal = generic = 0
+    inserted = personal = generic = rejected = 0
     companies_with_hits = 0
+    by_id = {r['id']: r['domain'] for r in rows}
 
     with futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
         for res in pool.map(scrape_one, rows):
@@ -177,13 +238,20 @@ def main():
                 print(f"  none  {res['name'][:26]:26}")
                 continue
 
-            companies_with_hits += 1
+            company_domain = by_id[res["company_id"]]
+            hit_this_company = False
             for f in keep:
-                email = f["email"].strip()
-                low = email.lower()
+                email = normalise(f["email"])
+                keep_it, why = acceptable(email, company_domain)
+                if not keep_it:
+                    rejected += 1
+                    print(f"  reject   {res['name'][:22]:22} {email[:34]:34} ({why})")
+                    continue
+                low = email
                 if low in existing or low in already:
                     continue
                 existing.add(low)
+                hit_this_company = True
                 confidence = 100 if f["source_url"] and "mailto" not in f else 95
                 con.execute(
                     """INSERT OR IGNORE INTO contacts
@@ -201,10 +269,13 @@ def main():
                     personal += 1
                 tag = "generic" if f["is_generic"] else "PERSONAL"
                 print(f"  {tag:8} {res['name'][:22]:22} {email}")
+            if hit_this_company:
+                companies_with_hits += 1
 
     con.commit()
     print(f"\n[APPLIED] {len(rows)} companies scraped, {companies_with_hits} had usable addresses")
     print(f"  inserted {inserted} contacts ({personal} personal, {generic} generic) at priority 7000")
+    print(f"  rejected {rejected} addresses (wrong company, placeholder, or malformed)")
     total = con.execute("SELECT COUNT(*) FROM contacts WHERE is_invalid=0").fetchone()[0]
     high = con.execute("SELECT COUNT(*) FROM contacts WHERE is_invalid=0 AND email_confidence>=95").fetchone()[0]
     print(f"  active contacts: {total}, of which confidence>=95: {high}")
