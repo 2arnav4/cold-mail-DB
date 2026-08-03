@@ -246,8 +246,20 @@ def verify_email(email: str):
     if result is True:
         catchall = is_catchall_domain(domain)
         time.sleep(INTER_CALL_DELAY)
-        if catchall:
+        if catchall is True:
             return None, "catchall_unverifiable"
+        if catchall is None:
+            # The catch-all probe could not get an answer, so we do not know
+            # whether a 250 on the real address meant anything.
+            #
+            # This used to read `if catchall:` -- and None is falsy in Python,
+            # so an inconclusive probe took the same branch as a confirmed
+            # not-catch-all and returned (True, "smtp"). The address was then
+            # sent to on the strength of a check that never completed, which
+            # contradicts this module's own docstring. Three of fifteen sends
+            # on 2026-08-02 went out this way after the probe was refused with
+            # 5.7.1 by our blocklisted IP.
+            return None, "catchall_inconclusive"
         return True, "smtp"
 
     # SMTP was inconclusive (blocked/timed out/no real answer) and there's no

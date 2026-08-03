@@ -369,6 +369,24 @@ func VerifyEmail(email string) Result {
 		return done(Unknown, "smtp_inconclusive")
 	}
 
+	// A 250 from a Google-hosted domain is not evidence of anything.
+	//
+	// Google's MTA accepts RCPT TO at the gateway for addresses that do not
+	// exist, then rejects at delivery time with "550-5.1.1 The email account
+	// that you tried to reach does not exist". Measured on 2026-08-02: of 15
+	// sends, all 8 bounces were Google-hosted domains the probe had called
+	// deliverable, and 0 of 5 non-Google domains bounced. Across the verified
+	// candidate pool, 181 of 186 "valid" verdicts were Google-hosted -- so the
+	// verdict was meaningless for 97% of the addresses it was applied to.
+	//
+	// Reporting Unknown here is a large downgrade in apparent coverage and an
+	// accurate one. Deliverability for these domains can only be learned by
+	// sending and reading the bounce.
+	if isGoogleHosted(domain) {
+		debugf("  [GOOGLE] %s accepts RCPT for unknown users; 250 proves nothing\n", domain)
+		return done(Unknown, "google_unverifiable")
+	}
+
 	time.Sleep(interCallDelay)
 
 	switch isCatchAllDomain(domain) {
