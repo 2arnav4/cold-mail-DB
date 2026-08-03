@@ -1,0 +1,27 @@
+{
+  "name": "outreach",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Per-company cold outreach: research digest, email, and a 5-slide technical deck.",
+  "scripts": {
+    "new": "tsx src/index.ts new",
+    "research": "tsx src/index.ts research",
+    "check": "tsx src/index.ts check",
+    "build": "tsx src/index.ts build",
+    "log": "tsx src/index.ts log",
+    "status": "tsx src/index.ts status"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "js-yaml": "^4.1.0",
+    "puppeteer": "^24.10.0"
+  },
+  "devDependencies": {
+    "@types/ejs": "^3.1.5",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

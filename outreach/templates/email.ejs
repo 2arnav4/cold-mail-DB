@@ -1,0 +1,23 @@
+To: <%= c.recipient.name %> <<%= c.recipient.email %>>
+Subject: <%= subject %>
+
+Hi <%= c.recipient.name.split(" ")[0] %>,
+
+<%= c.email.hook_line %>
+
+<%= c.email.finding_line %>
+
+<%= c.email.ask_line %>
+
+Attached: my resume, and a short deck on this. <%= c.finding.title %>.
+
+Resources
+<% c.resources.forEach(function (r) { -%>
+- <%= r.label %>: <%= r.url %>
+<% }); -%>
+
+<%= sender.name %>
+<% sender.signature_lines.forEach(function (l) { -%>
+<%= l %>
+<% }); -%>
+<%= sender.email %>

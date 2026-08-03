@@ -1,0 +1,85 @@
+# Copy via: npm run new -- <slug> "Company Name"
+#
+# Everything in this file is a judgement call and none of it can be scraped.
+# `npm run check` refuses to build while any required field is still a
+# placeholder, because a tool that makes it easy to send generic mail is worse
+# than no tool.
+
+name: TODO
+# One concrete sentence about what they build. Not their homepage tagline.
+what_they_build: TODO
+
+# From the job posting. It is listed there, literally.
+stack: []
+
+# Deck theming. Pull the hex from their site or logo.
+brand:
+  primary: "#1a1a1a"
+  accent: "#1a1a1a"
+
+# One line that positions you for THIS company.
+positioning: TODO
+
+recipient:
+  name: TODO
+  # Engineering manager, tech lead, founding engineer, or the founder at a
+  # small startup. Not HR. Not careers@.
+  role: TODO
+  email: TODO
+  # Where you found the address, so you can retrace it later.
+  source: TODO
+
+# The first line of the email is about them. A release, a blog post, a GitHub
+# issue, a funding round. No URL means you did not actually verify it.
+hook:
+  what: TODO
+  url: TODO
+
+# The artifact. Without this there is no reason for the email to exist.
+# type: pr | bug | tool | teardown, strongest first.
+finding:
+  type: teardown
+  title: TODO
+  summary: TODO
+  # Repro steps, a benchmark, a stack trace, a diff. This is slide 2 and slide
+  # 2 is what earns the interview.
+  evidence: |
+    TODO
+  # Optional: a screenshot instead of the text block above.
+  # evidence_image: ../../assets/shots/<slug>.png
+  link:
+
+# Two or three of your projects, mapped onto THEIR stack. Quantify.
+my_relevant_work:
+  - project: TODO
+    what: TODO
+    why_relevant: TODO
+  - project: TODO
+    what: TODO
+    why_relevant: TODO
+
+# Three bullets, specific to them. Vague answers here mean you have not read
+# enough about the company yet.
+first_30_days:
+  - TODO
+  - TODO
+  - TODO
+
+# Draft at least three. This is the highest leverage line in the email.
+subject_candidates:
+  - TODO
+  - TODO
+  - TODO
+subject_chosen: 0
+
+# Three to five lines total. No em-dashes. Name the company.
+email:
+  hook_line: TODO
+  finding_line: TODO
+  # Small and concrete. "Worth me opening a PR for this?" beats "please
+  # consider my application".
+  ask_line: TODO
+
+resources:
+  - label: GitHub
+    url: https://github.com/2arnav4

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title><%= sender.name %> x <%= c.name %></title>
+<style>
+  :root {
+    --brand: <%= c.brand.primary %>;
+    --accent: <%= c.brand.accent || c.brand.primary %>;
+    --ink: #12151a;
+    --muted: #626b78;
+    --hair: #e2e6eb;
+    --paper: #ffffff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #f2f4f7; }
+  body {
+    font-family: -apple-system, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .slide {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+    /* Bottom padding reserves the footer strip so content can never collide with it. */
+    padding: 68px 88px 104px;
+    background: var(--paper);
+    page-break-after: always;
+    break-after: page;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+
+  .eyebrow {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+  }
+  h1 { font-size: 62px; line-height: 1.04; letter-spacing: -.025em; font-weight: 800; }
+  h2 { font-size: 40px; line-height: 1.12; letter-spacing: -.02em; font-weight: 750; max-width: 22ch; }
+  .lede { font-size: 21px; line-height: 1.5; color: var(--muted); max-width: 62ch; }
+  .rule { width: 64px; height: 5px; background: var(--accent); border-radius: 3px; margin: 26px 0; }
+  .foot {
+    position: absolute; left: 88px; right: 88px; bottom: 40px;
+    display: flex; justify-content: space-between;
+    font-size: 13px; color: var(--muted);
+    border-top: 1px solid var(--hair); padding-top: 14px;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* 1. Cover */
+  .cover { background: var(--brand); color: #fff; justify-content: center; }
+  .cover h1 { max-width: 20ch; }
+  .cover .lede { color: rgba(255,255,255,.82); margin-top: 22px; }
+  .cover .rule { background: rgba(255,255,255,.9); }
+  .cover .eyebrow { color: rgba(255,255,255,.72); }
+  .cover .foot { color: rgba(255,255,255,.7); border-top-color: rgba(255,255,255,.22); }
+  .stackrow { display: flex; gap: 8px; margin-top: 34px; flex-wrap: wrap; }
+  .chip {
+    font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+    background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.22);
+  }
+
+  /* 2. Finding */
+  .split { display: grid; grid-template-columns: 1fr 1.05fr; gap: 52px; flex: 1; align-items: start; margin-top: 10px; }
+  .evidence {
+    background: #0f1319; color: #d8e0ea; border-radius: 12px;
+    padding: 22px 24px; font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    max-height: 500px; overflow: hidden;
+  }
+  .evidence-img { width: 100%; border-radius: 12px; border: 1px solid var(--hair); max-height: 500px; object-fit: cover; object-position: top; }
+  .badge {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: 6px 12px; border-radius: 6px;
+    background: var(--accent); color: #fff; margin-bottom: 20px;
+  }
+
+  /* 3. Why me */
+  .cards { display: flex; flex-direction: column; gap: 16px; margin-top: 26px; flex: 1; justify-content: flex-start; }
+  .card {
+    border: 1px solid var(--hair); border-left: 5px solid var(--accent);
+    border-radius: 10px; padding: 18px 24px; background: #fbfcfd;
+  }
+  .card h3 { font-size: 20px; font-weight: 750; margin-bottom: 5px; }
+  .card .what { font-size: 15.5px; color: var(--ink); line-height: 1.45; }
+  .card .why { font-size: 14.5px; color: var(--muted); line-height: 1.45; margin-top: 7px; }
+  .card .why b { color: var(--accent); font-weight: 700; }
+
+  /* 4. 30 days */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin-top: 44px; }
+  .step { border-top: 4px solid var(--accent); padding-top: 20px; }
+  .step .k { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .step .v { font-size: 19px; line-height: 1.45; font-weight: 550; }
+
+  /* 5. Close */
+  .close { background: var(--brand); color: #fff; justify-content: center; }
+  .close h2 { color: #fff; font-size: 46px; max-width: 24ch; }
+  .close .rule { background: rgba(255,255,255,.9); }
+  .close .eyebrow { color: rgba(255,255,255,.72); }
+  .links { margin-top: 34px; display: flex; flex-direction: column; gap: 12px; }
+  .links a { color: #fff; font-size: 18px; text-decoration: none; opacity: .92; }
+  .links a b { display: inline-block; min-width: 130px; opacity: .62; font-weight: 600; }
+  .close .foot { color: rgba(255,255,255,.7); border-top-color: rgba(255,255,255,.22); }
+</style>
+</head>
+<body>
+
+<!-- 1. Cover -->
+<section class="slide cover">
+  <div class="eyebrow">Prepared for <%= c.name %></div>
+  <h1><%= sender.name %></h1>
+  <div class="rule"></div>
+  <p class="lede"><%= c.positioning %></p>
+  <div class="stackrow">
+    <% c.stack.forEach(function (s) { %><span class="chip"><%= s %></span><% }); %>
+  </div>
+  <div class="foot">
+    <span><%= c.what_they_build %></span>
+    <span class="num">01</span>
+  </div>
+</section>
+
+<!-- 2. The finding. This is the slide that earns the interview. -->
+<section class="slide">
+  <div class="eyebrow">What I found</div>
+  <div class="split">
+    <div>
+      <span class="badge"><%= ({ pr: "Pull request", bug: "Bug report", tool: "Built a tool", teardown: "Teardown" })[c.finding.type] %></span>
+      <h2><%= c.finding.title %></h2>
+      <div class="rule"></div>
+      <p class="lede" style="font-size:19px"><%= c.finding.summary %></p>
+      <% if (c.finding.link) { %>
+        <p style="margin-top:22px;font-size:15px;color:var(--accent);font-weight:600;word-break:break-all"><%= c.finding.link %></p>
+      <% } %>
+    </div>
+    <% if (c.finding.evidence_image) { %>
+      <img class="evidence-img" src="<%= c.finding.evidence_image %>" alt="evidence">
+    <% } else { %>
+      <div class="evidence"><%= c.finding.evidence %></div>
+    <% } %>
+  </div>
+  <div class="foot">
+    <span><%= sender.name %> x <%= c.name %></span>
+    <span class="num">02</span>
+  </div>
+</section>
+
+<!-- 3. Why me -->
+<section class="slide">
+  <div class="eyebrow">Why me, specifically for <%= c.name %></div>
+  <h2 style="font-size:34px">Work that maps onto what you are already running</h2>
+  <div class="cards">
+    <% c.my_relevant_work.slice(0, 3).forEach(function (w) { %>
+      <div class="card">
+        <h3><%= w.project %></h3>
+        <div class="what"><%= w.what %></div>
+        <div class="why"><b>Relevant because</b> <%= w.why_relevant %></div>
+      </div>
+    <% }); %>
+  </div>
+  <div class="foot">
+    <span><%= sender.name %> x <%= c.name %></span>
+    <span class="num">03</span>
+  </div>
+</section>
+
+<!-- 4. First 30 days -->
+<section class="slide">
+  <div class="eyebrow">If I joined</div>
+  <h2>What I would pick up in the first 30 days</h2>
+  <div class="steps">
+    <% c.first_30_days.slice(0, 3).forEach(function (s, i) { %>
+      <div class="step">
+        <div class="k">Week <%= i === 0 ? "1" : i === 1 ? "2 to 3" : "4" %></div>
+        <div class="v"><%= s %></div>
+      </div>
+    <% }); %>
+  </div>
+  <div class="foot">
+    <span><%= sender.name %> x <%= c.name %></span>
+    <span class="num">04</span>
+  </div>
+</section>
+
+<!-- 5. Close -->
+<section class="slide close">
+  <div class="eyebrow">Next step</div>
+  <h2><%= c.email.ask_line %></h2>
+  <div class="rule"></div>
+  <div class="links">
+    <a><b>Email</b><%= sender.email %></a>
+    <% c.resources.forEach(function (r) { %>
+      <a href="<%= r.url %>"><b><%= r.label %></b><%= r.url %></a>
+    <% }); %>
+  </div>
+  <div class="foot">
+    <span><%= sender.headline %></span>
+    <span class="num">05</span>
+  </div>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+# Built output carries recipient names and addresses. Stays local.
+out/
+research/
+log.csv

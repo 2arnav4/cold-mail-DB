@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# WORKED EXAMPLE. Northwind Labs is fictional and so is everyone in this file.
+# It exists so you can run `npm run build` once and see the shape of a filled
+# in company. Delete it before you send anything real.
+# ---------------------------------------------------------------------------
+
+name: Northwind Labs
+what_they_build: A hosted Postgres change-data-capture service that streams row level changes into Kafka and webhooks.
+
+stack:
+  - Go
+  - Postgres
+  - Kafka
+  - TypeScript
+
+brand:
+  primary: "#123a5e"
+  accent: "#1f7a8c"
+
+positioning: Backend leaning CSE undergrad who has spent the last year on Go services and Postgres internals, and who reads changelogs for fun.
+
+recipient:
+  name: Priya Raman
+  role: Engineering Manager, Ingest
+  email: priya@northwind.dev
+  source: Named as reviewer on 14 of the last 20 PRs in northwind/cdc-core
+
+hook:
+  what: Shipped v0.9 of the CDC connector last Tuesday, with the new WAL slot recycling behaviour
+  url: https://github.com/northwind/cdc-core/releases/tag/v0.9.0
+
+finding:
+  type: bug
+  title: WAL slot leak on connector restart when the publication is dropped mid stream
+  summary: >
+    On restart, cdc-core recreates the replication slot before checking whether
+    the publication still exists. If the publication was dropped while the
+    connector was down, the old slot is never released and Postgres keeps
+    retaining WAL. On a test instance this held 4.2 GB of WAL across six
+    restarts. A three line reordering in slot.go fixes it, and I have a repro
+    plus a proposed patch ready to open as a PR.
+  evidence: |
+    $ docker compose up -d postgres
+    $ ./cdc-core --slot=nw_test --publication=nw_pub
+    $ psql -c 'DROP PUBLICATION nw_pub;'
+    $ pkill cdc-core && ./cdc-core --slot=nw_test --publication=nw_pub
+
+    $ psql -c "SELECT slot_name, active,
+        pg_size_pretty(pg_wal_lsn_diff(
+          pg_current_wal_lsn(), restart_lsn)) AS retained
+        FROM pg_replication_slots;"
+
+      slot_name  | active | retained
+    -------------+--------+----------
+     nw_test     | f      | 712 MB
+     nw_test_1   | t      | 0 bytes
+
+    Repeated six times: 4.2 GB retained, zero slots reclaimed.
+
+    slot.go:118  createSlot() runs before validatePublication()
+    Swapping the two, and dropping the orphan in the error path,
+    releases the slot on every restart in the same test.
+  link: https://github.com/2arnav4/northwind-wal-repro
+
+my_relevant_work:
+  - project: pgtail
+    what: A Go CLI that tails Postgres logical replication slots and prints decoded row changes as JSON, 1.2k lines, used by 40 people on my campus for debugging.
+    why_relevant: It is the same wire protocol cdc-core speaks, which is how I recognised the slot lifecycle bug in the first place.
+  - project: shiplog
+    what: An Express and Postgres service that ingests 200k webhook events a day into a partitioned table, with idempotency keys and a replay endpoint.
+    why_relevant: Northwind's webhook sink has the same at least once delivery problem, and I have already made the ordering and dedupe tradeoffs once.
+  - project: dsa-bench
+    what: A C++ harness that benchmarks 60 data structure implementations and tracks regressions across commits.
+    why_relevant: Evidence I measure before I claim, which is the habit behind the WAL numbers on the previous slide.
+
+first_30_days:
+  - Land the slot recycling fix with a regression test, then audit the rest of slot.go for the same ordering assumption.
+  - Get the connector's restart path under an integration test that actually drops and recreates publications, since that gap is what let this through.
+  - Write up the WAL retention failure mode for your docs, because your users hit it as a disk alert long before they hit it as a bug report.
+
+subject_candidates:
+  - Found a WAL slot leak in cdc-core v0.9, repro attached
+  - cdc-core restart path retains 4.2 GB of WAL, three line fix
+  - Arnav, backend intern who read your slot.go on a Sunday
+subject_chosen: 0
+
+email:
+  hook_line: Saw the v0.9 connector release on Tuesday, specifically the WAL slot recycling change, and went digging through cdc-core over the weekend.
+  finding_line: Found a leak in the restart path. If the publication is dropped while the connector is down, createSlot runs before validatePublication and the old slot is never released, so Postgres keeps retaining WAL. Six restarts held 4.2 GB on my test instance. Repro and a three line fix are in the deck.
+  ask_line: Worth me opening a PR for this? Happy either way, and I would like to talk about a backend internship at Northwind.
+
+resources:
+  - label: GitHub
+    url: https://github.com/2arnav4
+  - label: Repro repo
+    url: https://github.com/2arnav4/northwind-wal-repro
