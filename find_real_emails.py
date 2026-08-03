@@ -94,6 +94,36 @@ PLACEHOLDER_LOCALS = {
     "you", "user", "test", "name", "email", "yourname", "someone",
     "firstname", "username", "example", "your", "no-reply", "noreply",
 }
+
+# Never mail these. abuse@ is the address people use to REPORT spam, so cold
+# outreach to it is a direct request to be listed. The rest are legal, security
+# and infrastructure mailboxes where an internship pitch is noise at best.
+BLOCKED_LOCALS = {
+    "abuse", "postmaster", "hostmaster", "webmaster", "security", "privacy",
+    "legal", "dpo", "gdpr", "compliance", "noc", "unsubscribe", "bounce",
+    "mailer-daemon", "spam", "phishing", "root", "billing", "invoice",
+    "accounts", "accounting", "donotreply",
+}
+
+# Lower rank sends first. A founders@ address at a seed-stage startup is read
+# by a founder; sales@ lands in a CRM and support@ opens a ticket. careers@ is
+# the single most on-target mailbox for an internship enquiry.
+LOCAL_RANK = [
+    ({"careers", "jobs", "join", "hiring", "recruiting", "talent", "work"}, 1),
+    ({"founders", "founder", "team", "hello", "hey", "hi", "people"}, 2),
+    ({"contact", "info", "enquiries", "inquiries", "general", "office"}, 3),
+    ({"press", "media", "partnerships", "partners", "marketing"}, 5),
+    ({"sales", "support", "help", "admin", "service", "customercare"}, 6),
+]
+
+
+def local_rank(email: str) -> int:
+    """0 for a personal address, higher for progressively worse shared ones."""
+    local = email.split("@", 1)[0].lower()
+    for group, rank in LOCAL_RANK:
+        if local in group:
+            return rank
+    return 0  # looks like a person's name
 EMAIL_OK = re.compile(r"^[\w.+\-]+@[\w\-]+(\.[\w\-]+)*\.[a-zA-Z]{2,}$")
 
 
@@ -132,6 +162,8 @@ def acceptable(email: str, company_domain: str) -> tuple[bool, str]:
         return False, "placeholder domain"
     if local in PLACEHOLDER_LOCALS:
         return False, "placeholder local part"
+    if local in BLOCKED_LOCALS:
+        return False, f"{local}@ is never a valid outreach target"
     if not same_company(domain, company_domain):
         return False, f"belongs to {domain}, not {company_domain}"
     return True, ""
