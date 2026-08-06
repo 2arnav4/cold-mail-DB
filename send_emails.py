@@ -1308,6 +1308,30 @@ def main():
         except Exception as e:
             print(f"  WARNING: could not read {args.verified_csv}: {e}")
 
+    # Addresses verify/probe_batch.py already confirmed under the current code.
+    #
+    # `probe_checked_at` is only set by that script, which runs with IPv4 forced
+    # and real catch-all detection. Without this the sender re-probes an address
+    # it already has a good answer for, and right now that live probe often
+    # comes back `catchall_inconclusive` or blocked -- so a confirmed contact
+    # gets held back on the strength of a worse check than the one already run.
+    # koen@framer.com was skipped exactly this way.
+    try:
+        _con = sqlite3.connect(cfg["db_path"], timeout=60)
+        pre_verified |= {
+            r[0].lower() for r in _con.execute(
+                """SELECT email FROM contacts
+                   WHERE email IS NOT NULL AND is_invalid = 0
+                     AND probe_checked_at IS NOT NULL
+                     AND email_verified = 1
+                     AND email_provenance = 'verified_guess'""")
+            if r[0]
+        }
+        _con.close()
+        print(f"  Confirmed by probe_batch: {len(pre_verified)} total pre-verified")
+    except Exception as e:
+        print(f"  WARNING: could not read probe results: {e}")
+
     # Seconds to wait between sends. 15/hour -> 240s. Zero in dry-run, where
     # nothing leaves the machine and pacing would only waste your time.
     send_interval = (

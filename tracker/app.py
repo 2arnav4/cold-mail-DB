@@ -104,9 +104,15 @@ def init_db():
                 status        TEXT    DEFAULT 'sent',
                 bounce_reason TEXT    DEFAULT '',
                 bounce_type   TEXT    DEFAULT '',
-                retry_after   TEXT    DEFAULT ''
+                retry_after   TEXT    DEFAULT '',
+                sender_ip     TEXT    DEFAULT ''
             )
         """)
+        # Added later; existing databases need the column backfilled.
+        try:
+            conn.execute("ALTER TABLE sends ADD COLUMN sender_ip TEXT DEFAULT ''")
+        except Exception:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS clicks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -238,12 +244,18 @@ def log_send():
         return jsonify({"error": "Missing email"}), 400
     try:
         with closing(get_db()) as conn, conn:
+            # The IP that logged the send is the sender's own machine. Storing
+            # it lets the pixel tell "the recipient opened this" apart from
+            # "the sender opened their own Sent folder", which are otherwise
+            # identical requests.
+            sender_ip = (request.headers.get("X-Forwarded-For", request.remote_addr or "")
+                         .split(",")[0].strip())
             conn.execute(
-                "INSERT INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
-                "VALUES (?, ?, ?, 'sent', '', '', '') "
+                "INSERT INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after, sender_ip) "
+                "VALUES (?, ?, ?, 'sent', '', '', '', ?) "
                 "ON CONFLICT(email) DO UPDATE SET company=excluded.company, sent_at=excluded.sent_at, "
-                "status='sent', bounce_reason='', bounce_type='', retry_after=''",
-                (email, company, sent_at),
+                "status='sent', bounce_reason='', bounce_type='', retry_after='', sender_ip=excluded.sender_ip",
+                (email, company, sent_at, sender_ip),
             )
         return jsonify({"status": "success"}), 200
     except Exception as e:
@@ -444,7 +456,7 @@ def track(encoded):
     try:
         with closing(get_db()) as conn, conn:
             row = conn.execute(
-                "SELECT sent_at FROM sends WHERE email = ?", (email,)
+                "SELECT sent_at, sender_ip FROM sends WHERE email = ?", (email,)
             ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
@@ -454,6 +466,25 @@ def track(encoded):
         print(f"Error calculating seconds_since_send: {e}")
 
     is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
+
+    # An open from the same IP that sent the mail is the sender reading their
+    # own Sent folder, or reading a bounce notification -- Gmail quotes the
+    # original underneath a bounce, so rendering it loads this pixel and
+    # martin@shopgarage.com showed as "Opened" two minutes after it hard-bounced.
+    # Neither is the recipient, and counting them inflates the one number the
+    # dashboard exists to report.
+    self_open = False
+    try:
+        with closing(get_db()) as conn:
+            r = conn.execute("SELECT sender_ip FROM sends WHERE email = ?", (email,)).fetchone()
+            sender_ip = (r["sender_ip"] if r else "") or ""
+            if sender_ip and ip:
+                self_open = sender_ip.split(",")[0].strip() == ip.split(",")[0].strip()
+    except Exception:
+        pass
+    if self_open:
+        print(f"Ignoring self-open for {email!r} (request from the sending IP)")
+        return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
 
     try:
         with closing(get_db()) as conn, conn:
@@ -529,7 +560,7 @@ def click(encoded):
     try:
         with closing(get_db()) as conn, conn:
             row = conn.execute(
-                "SELECT sent_at FROM sends WHERE email = ?", (email,)
+                "SELECT sent_at, sender_ip FROM sends WHERE email = ?", (email,)
             ).fetchone()
             if row and row["sent_at"]:
                 sent_dt = datetime.strptime(row["sent_at"], "%Y-%m-%d %H:%M:%S")
