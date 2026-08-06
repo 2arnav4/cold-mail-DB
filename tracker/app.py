@@ -4,7 +4,7 @@ import hmac
 import base64
 import sqlite3
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import (
     Flask, request, send_file, jsonify, render_template_string, redirect,
@@ -113,6 +113,12 @@ def init_db():
             conn.execute("ALTER TABLE sends ADD COLUMN sender_ip TEXT DEFAULT ''")
         except Exception:
             pass
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS clicks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -436,6 +442,39 @@ def recompute_bot():
         return jsonify({"error": str(e)}), 500
 
 
+def mute_active() -> bool:
+    """True while a mute window set by /api/mute is still open."""
+    try:
+        with closing(get_db()) as conn:
+            r = conn.execute("SELECT value FROM settings WHERE key='mute_until'").fetchone()
+            if not r or not r["value"]:
+                return False
+            until = datetime.strptime(r["value"], "%Y-%m-%d %H:%M:%S")
+            return datetime.now(timezone.utc).replace(tzinfo=None) < until
+    except Exception:
+        return False
+
+
+@app.route("/api/mute", methods=["POST"])
+@require_auth
+def api_mute():
+    """Drop opens and clicks for the next N minutes.
+
+    For reading your own Sent folder without the tracker counting it as the
+    recipient. Gmail proxies images, so the request itself cannot be attributed
+    to a reader -- declaring the window in advance is the only reliable way."""
+    minutes = int((request.get_json(silent=True) or {}).get("minutes", 10))
+    minutes = max(1, min(minutes, 240))
+    until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=minutes)
+    with closing(get_db()) as conn, conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('mute_until', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (until.strftime("%Y-%m-%d %H:%M:%S"),))
+    return jsonify({"muted_until_utc": until.strftime("%Y-%m-%d %H:%M:%S"),
+                    "minutes": minutes}), 200
+
+
 # ── Tracking pixel ────────────────────────────────────────────────────────────
 @app.route("/t/<path:encoded>.gif")
 def track(encoded):
@@ -467,24 +506,31 @@ def track(encoded):
 
     is_bot = 1 if classify_bot(ua, seconds_since_send) else 0
 
-    # An open from the same IP that sent the mail is the sender reading their
-    # own Sent folder, or reading a bounce notification -- Gmail quotes the
-    # original underneath a bounce, so rendering it loads this pixel and
-    # martin@shopgarage.com showed as "Opened" two minutes after it hard-bounced.
-    # Neither is the recipient, and counting them inflates the one number the
-    # dashboard exists to report.
-    self_open = False
+    # Reading your own Sent folder registers as the recipient opening the mail,
+    # and it cannot be detected from the request. Gmail never loads this pixel
+    # from the reader's browser -- it proxies every image through its own
+    # servers, so the hit arrives from 66.249.x.x with a ggpht.com user agent
+    # whether the reader is the recipient or the sender. The Sent copy and the
+    # delivered copy carry the identical URL. There is no signal to separate
+    # them, so comparing against the sending IP never fires for Gmail.
+    #
+    # The mute window is the honest alternative: say "I am about to read my own
+    # mail" and opens are dropped until it expires. See /api/mute.
+    if mute_active():
+        print(f"Muted: dropping open for {email!r}")
+        return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
+
+    # Still checked, because a non-proxying client (Apple Mail, Outlook desktop)
+    # does fetch directly and this catches those.
     try:
         with closing(get_db()) as conn:
             r = conn.execute("SELECT sender_ip FROM sends WHERE email = ?", (email,)).fetchone()
             sender_ip = (r["sender_ip"] if r else "") or ""
-            if sender_ip and ip:
-                self_open = sender_ip.split(",")[0].strip() == ip.split(",")[0].strip()
+            if sender_ip and ip and sender_ip.split(",")[0].strip() == ip.split(",")[0].strip():
+                print(f"Ignoring self-open for {email!r} (direct hit from the sending IP)")
+                return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
     except Exception:
         pass
-    if self_open:
-        print(f"Ignoring self-open for {email!r} (request from the sending IP)")
-        return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
 
     try:
         with closing(get_db()) as conn, conn:
