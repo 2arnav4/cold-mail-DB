@@ -1317,7 +1317,7 @@ def main():
     # gets held back on the strength of a worse check than the one already run.
     # koen@framer.com was skipped exactly this way.
     try:
-        _con = sqlite3.connect(cfg["db_path"], timeout=60)
+        _con = sqlite3.connect(CONFIG["db_path"], timeout=60)
         pre_verified |= {
             r[0].lower() for r in _con.execute(
                 """SELECT email FROM contacts
