@@ -245,12 +245,14 @@ def main() -> int:
     con.executemany(
         "UPDATE contacts SET is_invalid=1, invalid_reason=? WHERE id=?",
         [(verdicts[cid][1][:32], cid) for cid in remove])
-    # A confirmed mailbox is still only a confirmed mailbox -- the address was
-    # generated, so it goes to 'verified_guess' at 70 rather than joining the
-    # published tier. It stays below the send gate until something finds it
-    # published somewhere.
+    # 80: above the send gate, below the published tiers. The receiving server
+    # confirmed the mailbox exists on a domain proven not to be catch-all, so it
+    # will not bounce -- which is the thing being optimised. It stays under
+    # 'published' because the address was still constructed: the mailbox is
+    # real, but nothing here proves it belongs to the person the row names.
+    # Must match TIERS['verified_guess'] in score_confidence.py.
     con.executemany(
-        "UPDATE contacts SET email_confidence=70, email_provenance='verified_guess',"
+        "UPDATE contacts SET email_confidence=80, email_provenance='verified_guess',"
         " confidence_scored_at=?, email_verified=1 WHERE id=?",
         [(now, cid) for cid in keep])
     con.commit()

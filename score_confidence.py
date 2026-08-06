@@ -13,11 +13,17 @@ probe answers a different question and is recorded separately in
 
 Tiers, highest evidence first:
 
-    100  published    read off the company's own site (mailto: or page text)
-     95  researched   found by hand / targeted search, one address at a time
-     75  list         curated HR list, local-part shows a real naming scheme
-     35  unattributed real-looking address, provenance lost
-     15  guessed      firstname@domain, invented by a pattern generator
+    100  published      read off the company's own site (mailto: or page text)
+     95  researched     found by hand / targeted search, one address at a time
+     80  verified_guess constructed, but the mail server confirmed the mailbox
+     75  list           curated HR list, local-part shows a real naming scheme
+     35  unattributed   real-looking address, provenance lost
+     15  guessed        firstname@domain, invented by a pattern generator
+
+`verified_guess` is the one tier set by evidence from outside this file: a live
+SMTP probe on a domain proven not to be catch-all. It is preserved rather than
+re-derived, because the local part is still `firstname@domain` and every rule
+here would otherwise send it back to 15.
 
 The 15 is deliberately below any sane send threshold. Those rows are not
 deleted -- they name a real person at a real company, so they are worth
@@ -47,6 +53,12 @@ DEFAULT_DB = os.path.join(HERE, "turso-full.db")
 TIERS = {
     "published": 100,
     "researched": 95,
+    # A generated address whose mailbox a live SMTP probe confirmed, on a domain
+    # proven not to be catch-all. Below the published tiers because the address
+    # was still constructed rather than found -- the mailbox exists, but nothing
+    # says it belongs to the person the row names. Above the list tier because
+    # the confirmation is current rather than months old.
+    "verified_guess": 80,
     "list": 75,
     "unattributed": 35,
     "guessed": 15,
@@ -109,6 +121,16 @@ def classify(row) -> tuple[str, str]:
     pattern = (row["scraped_pattern"] or "").strip().lower()
     old_conf = row["email_confidence"]
     has_url = bool(row["source_url"])
+    current = (row["email_provenance"] or "").strip()
+
+    # A live SMTP probe already answered the question this function only
+    # estimates. verify_guesses.py writes 'verified_guess' when the receiving
+    # server confirmed the mailbox on a domain proven not to be catch-all, and
+    # re-deriving from the address shape would throw that away -- the local part
+    # is still firstname@domain, so every rule below would send it back to 15.
+    # Evidence from the mail server outranks evidence from the string.
+    if current == "verified_guess":
+        return "verified_guess", "mailbox confirmed by SMTP probe"
 
     # Strongest evidence: the company published it and we kept the URL.
     if pattern == "found" or starts_with_any(source, PUBLISHED_SOURCES):
@@ -176,7 +198,7 @@ def main() -> int:
     where = "" if args.include_invalid else "WHERE is_invalid = 0"
     rows = con.execute(
         f"""SELECT id, email, name, source, scraped_pattern, email_confidence,
-                   source_url, email_verified
+                   source_url, email_verified, email_provenance
             FROM contacts {where}"""
     ).fetchall()
 
@@ -199,7 +221,7 @@ def main() -> int:
 
     print(f"{'class':<14}{'conf':>6}{'count':>9}{'share':>8}  basis")
     print("-" * 78)
-    for cls in ("published", "researched", "list", "unattributed", "guessed"):
+    for cls in ("published", "researched", "verified_guess", "list", "unattributed", "guessed"):
         n = counts.get(cls, 0)
         if not n:
             continue
