@@ -126,7 +126,16 @@ def mailbox_quality(email: str, name: str | None) -> int:
         return 2
     if local in FOUNDER_BOX:
         return 3
-    # One alphabetic token that is not a known function word reads as a name.
+
+    # "Looks like a word" is not evidence of a person. guest-posts@,
+    # taxagencies@, smartassetamp@, hotro@ and salses@ (a typo of sales) are all
+    # alphabetic tokens absent from any blocklist, and all scored as personal
+    # addresses -- they filled most of a 15-contact batch. A recorded name on
+    # the contact row is the only positive evidence available here, so without
+    # one the shape of the local part decides nothing.
+    if not name:
+        return 4
+
     if len(tokens) == 1 and tokens[0].isalpha() and 2 <= len(tokens[0]) <= 14:
         return 1
     if len(tokens) == 2 and all(t.isalpha() for t in tokens):
@@ -144,6 +153,7 @@ def build(con, limit: int, tier_filter: str | None, include_sent: bool):
         WITH ranked AS (
             SELECT ct.id, ct.email, ct.name, ct.role, ct.email_confidence conf,
                    ct.email_provenance prov, ct.email_verified ver, ct.priority,
+                   ct.probe_checked_at probed_at,
                    co.name company, co.domain, co.batch, co.source co_source,
                    COALESCE(co.open_roles,0) open_roles, co.industry,
                    ROW_NUMBER() OVER (
@@ -163,10 +173,16 @@ def build(con, limit: int, tier_filter: str | None, include_sent: bool):
         if not include_sent and addr in sent:
             continue
 
-        prov, ver = r["prov"] or "", r["ver"] or 0
-        if prov == "published" and ver:
+        prov = r["prov"] or ""
+        # email_verified alone is not evidence: 730 rows carry it from probes
+        # run before the IPv4 fix and before catch-all detection worked on
+        # Google-hosted domains. Only probe_checked_at means a probe ran under
+        # the current code. Anything else falls back to how the address was
+        # found, which for `published` does not depend on probing at all.
+        fresh = bool(r["probed_at"])
+        if prov == "published" and fresh:
             tier = 1
-        elif prov == "verified_guess" or (ver and prov != "published"):
+        elif fresh and prov == "verified_guess":
             tier = 2
         elif prov in ("published", "researched"):
             tier = 3

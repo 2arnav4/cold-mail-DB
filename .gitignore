@@ -52,3 +52,4 @@ venv/
 verifier/verifier
 verify_results_*.csv
 verify_results*.csv
+personalized_emails.local.json
