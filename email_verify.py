@@ -239,9 +239,17 @@ def is_catchall_domain(domain: str) -> bool | None:
     False (domain properly rejects unknowns, real-address result trustworthy),
     or None (couldn't determine, e.g. MX/connection issue).
 
-    Skips Google-hosted domains entirely -- see is_google_hosted."""
-    if is_google_hosted(domain):
-        return False
+    Google-hosted domains used to be exempted here and assumed never to be
+    catch-all. That is wrong: Google Workspace lets an admin route unknown
+    recipients to a catch-all address, and a domain configured that way answers
+    250 to every RCPT TO exactly like any other catch-all. shopgarage.com is one
+    -- `martin@` and `zzq-not-real-77812@` both returned 250, the address passed
+    verification, and the send hard-bounced with "The email account that you
+    tried to reach does not exist."
+
+    Being Google-hosted is a statement about the MX, not about recipient
+    validation, so it cannot stand in for actually probing. Every domain is
+    probed the same way now."""
     fake_local = "zzz-nonexistent-" + "".join(random.choices(string.digits, k=10))
     return verify_smtp(f"{fake_local}@{domain}")
 
