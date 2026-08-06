@@ -4,8 +4,10 @@ __pycache__/
 !outreach/companies/example-northwind.yaml
 .DS_Store
 .env
+.env.backup-*
 .venv/
 *_run.log
+*.backup-*
 *.db
 *.db-shm
 *.db-wal
@@ -44,6 +46,7 @@ outreach/companies/*.yaml
 outreach/node_modules/
 outreach/out/
 outreach/research/
+personalized_emails.local.json
 sent_log_bounce_state.json
 sent_log_failed.json
 sent_log_opens.json
@@ -52,4 +55,3 @@ venv/
 verifier/verifier
 verify_results_*.csv
 verify_results*.csv
-personalized_emails.local.json
