@@ -67,6 +67,34 @@ def verify_local(email: str) -> bool:
 
 SMTP_TIMEOUT = 6
 
+# Probe over IPv4 only.
+#
+# This host has both an IPv4 and an IPv6 address, and `socket.create_connection`
+# prefers whatever `getaddrinfo` returns first -- in practice IPv6. Only the
+# IPv6 address is on a blocklist, so probes over it come back
+# `5.7.1 Service unavailable, Client host [2401:4900:...] blocked`, while the
+# identical probe over IPv4 gets a clean 250/550. That is a difference between
+# "cannot verify anything" and "can verify everything", decided purely by which
+# address family the resolver happened to hand back first.
+#
+# classify_rejection already reads those as policy rejections rather than dead
+# mailboxes, so nothing was being wrongly retired -- but every verdict came back
+# None, which looks identical to the probe being useless.
+_REAL_GETADDRINFO = socket.getaddrinfo
+
+
+def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+    results = _REAL_GETADDRINFO(host, port, socket.AF_INET, type, proto, flags)
+    if results:
+        return results
+    return _REAL_GETADDRINFO(host, port, family, type, proto, flags)
+
+
+def use_ipv4_for_smtp() -> None:
+    """Force IPv4 for every socket this process opens. Call once at startup."""
+    socket.getaddrinfo = _ipv4_only
+
+
 # These MUST resolve in public DNS. "coldmaildb.local" does not, so any server
 # that verifies the sender domain answers `450 4.1.8 Sender address rejected:
 # Domain not found` and the address comes back unverifiable for a reason that

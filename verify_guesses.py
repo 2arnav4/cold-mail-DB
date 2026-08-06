@@ -195,7 +195,11 @@ def main() -> int:
 
     # 4: SMTP, only if explicitly asked for and only where it can mean anything.
     if args.smtp:
-        from email_verify import verify_email  # noqa: PLC0415
+        from email_verify import verify_email, use_ipv4_for_smtp  # noqa: PLC0415
+        # Only this host's IPv6 address is blocklisted; the IPv4 one gets clean
+        # verdicts. Without this every probe returns None for a reason that has
+        # nothing to do with the address being checked.
+        use_ipv4_for_smtp()
         pending = [r for r in rows if verdicts[r["id"]][0] is None
                    and verdicts[r["id"]][1] == "undetermined"]
         print(f"\nsmtp probing {len(pending)} addresses "
