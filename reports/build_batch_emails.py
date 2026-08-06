@@ -60,15 +60,33 @@ BODY_MIDDLE = """
 I'm Arnav, a third year CSE student at ADGIPS in Delhi, graduating 2028. I work
 across the stack: React and Next.js with TypeScript on the front, Node/Express
 and Go behind it, Postgres and Mongo underneath.
-
-Three things I've actually shipped and can walk you through line by line:
-• Pulse, a collaborative workspace handling 3,000+ tasks across teams, with
-  Groq-generated standups and a JWT/Helmet secured backend
-• Lucent, a finance dashboard tracking 200+ stocks and crypto in real time
-  through Finnhub, MarketStack and CoinMarketCap
-• Student Helper, used by 150+ students, with notes sharing, a StudySwap
-  marketplace and role based access
 """
+
+# Every project carries its live link: naming one without a URL leaves the
+# reader nothing to check, so the claim does no work. Companies pick from these
+# by tag rather than receiving all three -- an identical project list under
+# every opening line is the mailmerge shape the personalisation exists to avoid.
+PROJECTS = {
+    "pulse": ("Pulse", "https://pulse-nu-liard.vercel.app/",
+              "a collaborative workspace handling 3,000+ tasks across teams,\n  with Groq-generated standups and a JWT/Helmet secured backend"),
+    "lucent": ("Lucent", "https://lucent-fintech-psi.vercel.app/",
+               "a finance dashboard tracking 200+ stocks and crypto in real\n  time through Finnhub, MarketStack and CoinMarketCap"),
+    "student": ("Student Helper", "https://student-helper-yaye.vercel.app/",
+                "used by 150+ students, with notes sharing, a StudySwap\n  marketplace and role based access"),
+}
+
+
+def projects_block(keys) -> str:
+    """Render only the named projects, each with its live link."""
+    picked = [PROJECTS[k] for k in keys if k in PROJECTS]
+    if not picked:
+        picked = [PROJECTS["pulse"]]
+    lead = ("Something I've built that is close to this:" if len(picked) == 1
+            else "Two things I've built and can walk you through line by line:")
+    bullet = "\u2022 "
+    lines = [bullet + f"{name} ({url}), {desc}" for name, url, desc in picked]
+    return lead + "\n" + "\n".join(lines)
+
 
 # (subject, opening line, closing line) per address. Written from each company's
 # own homepage h1/meta and YC one-liner, which is why every opener names
@@ -233,10 +251,12 @@ def compose(d) -> tuple[str, str] | None:
     entry = EMAILS.get(d["domain"])
     if not entry:
         return None
-    subject, opener, closer = entry
+    subject, opener, closer = entry[0], entry[1], entry[2]
+    picks = entry[3] if len(entry) > 3 else ("pulse",)
     body = (f"Hi {first_name(d['name'], d['email'])},\n\n"
             f"{opener}\n"
             f"{BODY_MIDDLE}\n"
+            f"{projects_block(picks)}\n\n"
             f"{closer}\n"
             f"{SIGNOFF}\n")
     return subject, body
