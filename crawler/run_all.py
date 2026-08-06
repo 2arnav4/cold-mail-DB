@@ -29,7 +29,10 @@ import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PY = sys.executable
+# -u on every child: their stdout is a pipe, not a tty, so Python block-buffers
+# it and a stage that runs for an hour shows nothing until it exits. That makes
+# a long run indistinguishable from a hung one.
+PY = [sys.executable, "-u"]
 
 
 def run_stage(name: str, argv: list[str], dry: bool) -> tuple[bool, float]:
@@ -62,13 +65,13 @@ def main() -> int:
     print(f"pipeline started {started:%Y-%m-%d %H:%M:%S}")
 
     stages = [
-        ("discover", [PY, "-m", "crawler.discover", "--source", "directory",
+        ("discover", [*PY, "-m", "crawler.discover", "--source", "directory",
                       "--with-founders", "--workers", "6"]),
-        ("hn", [PY, "-m", "crawler.hn", "--months", str(args.hn_months), "--apply"]),
-        ("harvest", [PY, "-m", "crawler.harvest", "--apply",
+        ("hn", [*PY, "-m", "crawler.hn", "--months", str(args.hn_months), "--apply"]),
+        ("harvest", [*PY, "-m", "crawler.harvest", "--apply",
                      "--concurrency", str(args.concurrency),
                      "--delay", str(args.delay)]),
-        ("score", [PY, "score_confidence.py", "--apply"]),
+        ("score", [*PY, "score_confidence.py", "--apply"]),
     ]
 
     results = []
