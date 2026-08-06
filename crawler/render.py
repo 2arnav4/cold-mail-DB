@@ -36,8 +36,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from crawler.db import connect, ensure_schema, upsert_contact, utc_now  # noqa: E402
-from crawler.harvest import extract_emails, CANDIDATE_PATHS, LINK_HINTS  # noqa: E402
+from crawler.db import connect, ensure_schema, upsert_contact  # noqa: E402
+from crawler.harvest import extract_emails  # noqa: E402
 from find_real_emails import acceptable, clean_name, guess_role, local_rank  # noqa: E402
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "

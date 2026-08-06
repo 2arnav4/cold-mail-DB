@@ -20,11 +20,8 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DB = os.path.join(HERE, "turso-full.db")
 
-# Confidence tiers, kept identical to score_confidence.py. Imported rather than
-# duplicated would be better, but that module is a script; this is the one
-# constant worth repeating and it is asserted in tests.
+# Must stay identical to TIERS["published"] in pipeline/score_confidence.py.
 CONF_PUBLISHED = 100
-CONF_LISTED = 75
 
 TRACKING_PREFIXES = ("www.", "m.", "web.")
 BAD_DOMAINS = {

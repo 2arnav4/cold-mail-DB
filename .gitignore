@@ -1,60 +1,54 @@
-# ── Sensitive files ───────────────────────────────────────────────────────────
-sent_log.json
-sent_log_failed.json
-sent_log_bounce_state.json
-*.db
-# Timestamped copies do not match *.db and carry the same contact rows.
-*.db.backup*
-*.db.bak
+
 __pycache__/
-*.pyc
-*.pyo
-.env
-
-# ── Virtualenvs ───────────────────────────────────────────────────────────────
-venv/
-.venv/
-
-# ── PDFs (personal) ──────────────────────────────────────────────────────────
-*.pdf
-
-# ── macOS ─────────────────────────────────────────────────────────────────────
-.DS_Store
-*.xlsx
-bounce_scan.log
-sent_log_opens.json
-
-
-# ── Go build artifacts ────────────────────────────────────────────────────────
-# The compiled verifier is ~4.6MB and rebuilds with `go build`. Never commit it.
-verifier/verifier
-*.exe
-
-# ── Verifier output ───────────────────────────────────────────────────────────
-# CSVs written by `verifier -out` contain contact addresses.
-verify_results*.csv
-
-# Contact databases stay local. Personal data, never pushed.
-hr-database/
-data_sources/
-# 63 real contact addresses are hardcoded in this script's source.
-add_new_hr_contacts.py
-
-# Local sqlite WAL sidecars
-*.db-shm
-*.db-wal
-
-# ── outreach/ (tier one: per-company email + deck) ────────────────────────────
-outreach/node_modules/
-# Build artifacts. send.json carries the recipient address, decks are personal.
-outreach/out/
-# GitHub API digests, regenerate with `npm run research`.
-outreach/research/
-# Company files carry recipient names and addresses. Same rule as hr-database/.
-outreach/companies/*.yaml
 !outreach/companies/_template.yaml
 !outreach/companies/example-northwind.yaml
-
-# Crawler run logs
-harvest_run.log
+.DS_Store
+.env
+.venv/
 *_run.log
+*.db
+*.db-shm
+*.db-wal
+*.db.backup*
+*.db.bak
+*.exe
+*.log
+*.pdf
+*.pyc
+*.pyo
+*.xlsx
+# ── Go build artifacts ────────────────────────────────────────────────────────
+# ── macOS ─────────────────────────────────────────────────────────────────────
+# ── outreach/ (tier one: per-company email + deck) ────────────────────────────
+# ── PDFs (personal) ──────────────────────────────────────────────────────────
+# ── Sensitive files ───────────────────────────────────────────────────────────
+# ── Verifier output ───────────────────────────────────────────────────────────
+# ── Virtualenvs ───────────────────────────────────────────────────────────────
+# 63 real contact addresses are hardcoded in this script's source.
+# Build artifacts. send.json carries the recipient address, decks are personal.
+# Company files carry recipient names and addresses. Same rule as hr-database/.
+# Contact databases stay local. Personal data, never pushed.
+# Crawler run logs
+# CSVs written by `verifier -out` contain contact addresses.
+# GitHub API digests, regenerate with `npm run research`.
+# Local sqlite WAL sidecars
+# Run logs and scratch output — regenerable, never committed
+# The compiled verifier is ~4.6MB and rebuilds with `go build`. Never commit it.
+# Timestamped copies do not match *.db and carry the same contact rows.
+add_new_hr_contacts.py
+bounce_scan.log
+data_sources/
+harvest_run.log
+hr-database/
+outreach/companies/*.yaml
+outreach/node_modules/
+outreach/out/
+outreach/research/
+sent_log_bounce_state.json
+sent_log_failed.json
+sent_log_opens.json
+sent_log.json
+venv/
+verifier/verifier
+verify_results_*.csv
+verify_results*.csv

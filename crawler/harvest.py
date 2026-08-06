@@ -41,7 +41,6 @@ import sys
 import time
 import urllib.robotparser
 from collections import defaultdict
-from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 import aiohttp

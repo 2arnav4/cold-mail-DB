@@ -3,7 +3,6 @@ import sqlite3
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from datetime import datetime
-import os
 
 def main():
     # 1. Read parsed PDF table data
