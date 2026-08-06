@@ -177,10 +177,30 @@ def guess_role(name_hint: str, email: str) -> str | None:
     return None
 
 
+# Words that make a capitalised phrase a call to action rather than a person.
+# Tested per token, never as a substring: "Contact Us" must be rejected while
+# "Kilian Justus" and "Walter Raftus" are kept, and a substring test on "us"
+# fails both of those.
+NOT_A_PERSON = {
+    "contact", "support", "sales", "info", "information", "enquiries", "enquiry",
+    "inquiries", "inquiry", "team", "help", "helpdesk", "careers", "jobs",
+    "hello", "message", "mail", "email", "touch", "customer", "customers",
+    "media", "press", "admin", "office", "service", "services", "billing",
+    "partner", "partners", "partnership", "partnerships", "feedback", "demo",
+    "us", "we", "here", "now", "today", "more", "learn", "book", "get", "talk",
+    "reach", "call", "write", "join", "subscribe", "apply", "request",
+}
+
+
 def clean_name(name_hint: str, email: str) -> str | None:
     """A name_hint is whatever text sat near the address, so it is often a
-    sentence fragment. Only keep it when it actually looks like a person's
-    name: two or three capitalised words and no punctuation soup."""
+    sentence fragment. Only keep it when it actually looks like a person's name.
+
+    Shape alone is not enough: "Contact Us", "Email Us" and "Contact Support"
+    are all two capitalised words and all passed the original test, which put 131
+    of them in the database as people. The template greets `{{first_name}}`, so
+    those became "Hi Contact," in a real cold email -- worse than no greeting.
+    """
     if not name_hint:
         return None
     hint = " ".join(name_hint.split())
@@ -190,6 +210,8 @@ def clean_name(name_hint: str, email: str) -> str | None:
     if not 2 <= len(words) <= 3:
         return None
     if not all(w[0].isupper() and w.replace("-", "").replace("'", "").isalpha() for w in words):
+        return None
+    if any(w.lower() in NOT_A_PERSON for w in words):
         return None
     return hint
 
