@@ -65,10 +65,16 @@ def clean_domain(raw: str) -> str | None:
 
 
 def connect(db_path: str = DEFAULT_DB) -> sqlite3.Connection:
-    con = sqlite3.connect(db_path, timeout=30)
+    # 30s was not enough. A scheduled probe batch and a bulk UPDATE across
+    # thousands of rows both hold the write lock for minutes, and a crawler that
+    # gives up after half a minute dies mid-run: the render pass crashed at
+    # 1,053 of 2,230 domains with "database is locked" while a probe batch was
+    # running. These are long background jobs sharing one file, so waiting is
+    # always better than failing -- there is nothing else for them to do.
+    con = sqlite3.connect(db_path, timeout=300)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA busy_timeout=30000")
+    con.execute("PRAGMA busy_timeout=300000")
     return con
 
 

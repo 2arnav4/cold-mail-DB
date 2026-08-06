@@ -31,6 +31,7 @@ Usage:
 import argparse
 import os
 import re
+import sqlite3
 import sys
 import time
 
@@ -155,16 +156,29 @@ def main() -> int:
                     samples.append(f"{hits[0]['email']} ({row['domain']})")
                 if args.apply and not args.sample:
                     for item in hits[:1]:
-                        r = upsert_contact(con, row["id"], {
-                            "email": item["email"],
-                            "name": clean_name(item["hint"], item["email"]),
-                            "role": guess_role(item["hint"], item["email"]),
-                            "confidence": item["confidence"],
-                            "provenance": "published",
-                            "source": "chrome-render",
-                            "source_url": item["source_url"],
-                            "priority": 3 if row["open_roles"] else 1,
-                        })
+                        # A browser run costs seconds per page and hours per
+                        # pass. Losing all of it to one lock timeout, as
+                        # happened at domain 1,053, is far worse than pausing:
+                        # retry rather than let the exception end the run.
+                        r = None
+                        for attempt in range(5):
+                            try:
+                                r = upsert_contact(con, row["id"], {
+                                    "email": item["email"],
+                                    "name": clean_name(item["hint"], item["email"]),
+                                    "role": guess_role(item["hint"], item["email"]),
+                                    "confidence": item["confidence"],
+                                    "provenance": "published",
+                                    "source": "chrome-render",
+                                    "source_url": item["source_url"],
+                                    "priority": 3 if row["open_roles"] else 1,
+                                })
+                                break
+                            except sqlite3.OperationalError as e:
+                                if "locked" not in str(e).lower() or attempt == 4:
+                                    print(f"  write failed for {row['domain']}: {e}")
+                                    break
+                                time.sleep(15 * (attempt + 1))
                         n_ins += r == "inserted"
             if i % 10 == 0:
                 if args.apply and not args.sample:
