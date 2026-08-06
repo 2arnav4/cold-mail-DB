@@ -404,6 +404,27 @@ def purge():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/reset_engagement", methods=["POST"])
+@require_auth
+def reset_engagement():
+    """Delete every open and click, keeping sends and bounces.
+
+    Opens recorded before 2026-08-06 cannot be trusted: they mix Gmail's
+    delivery-time prefetch, corporate scanners, and the sender reading his own
+    Sent folder, which is indistinguishable from the recipient reading it. The
+    counts are not wrong so much as meaningless, and a meaningless denominator
+    is worse than none.
+
+    Sends and bounces are untouched: those are facts about delivery, recorded
+    from SMTP results and DSNs rather than inferred from an image request."""
+    with closing(get_db()) as conn, conn:
+        opens = conn.execute("SELECT COUNT(*) c FROM opens").fetchone()["c"]
+        clicks = conn.execute("SELECT COUNT(*) c FROM clicks").fetchone()["c"]
+        conn.execute("DELETE FROM opens")
+        conn.execute("DELETE FROM clicks")
+    return jsonify({"deleted_opens": opens, "deleted_clicks": clicks}), 200
+
+
 # ── Recompute is_bot on already-stored rows using the current classify_bot
 #    logic (e.g. after a classifier change, so historical rows aren't stuck
 #    with a verdict made under the old rules) ─────────────────────────────────
@@ -440,39 +461,6 @@ def recompute_bot():
         return jsonify({"reclassified": changed}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-def mute_active() -> bool:
-    """True while a mute window set by /api/mute is still open."""
-    try:
-        with closing(get_db()) as conn:
-            r = conn.execute("SELECT value FROM settings WHERE key='mute_until'").fetchone()
-            if not r or not r["value"]:
-                return False
-            until = datetime.strptime(r["value"], "%Y-%m-%d %H:%M:%S")
-            return datetime.now(timezone.utc).replace(tzinfo=None) < until
-    except Exception:
-        return False
-
-
-@app.route("/api/mute", methods=["POST"])
-@require_auth
-def api_mute():
-    """Drop opens and clicks for the next N minutes.
-
-    For reading your own Sent folder without the tracker counting it as the
-    recipient. Gmail proxies images, so the request itself cannot be attributed
-    to a reader -- declaring the window in advance is the only reliable way."""
-    minutes = int((request.get_json(silent=True) or {}).get("minutes", 10))
-    minutes = max(1, min(minutes, 240))
-    until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=minutes)
-    with closing(get_db()) as conn, conn:
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('mute_until', ?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (until.strftime("%Y-%m-%d %H:%M:%S"),))
-    return jsonify({"muted_until_utc": until.strftime("%Y-%m-%d %H:%M:%S"),
-                    "minutes": minutes}), 200
 
 
 # ── Tracking pixel ────────────────────────────────────────────────────────────
@@ -514,12 +502,6 @@ def track(encoded):
     # delivered copy carry the identical URL. There is no signal to separate
     # them, so comparing against the sending IP never fires for Gmail.
     #
-    # The mute window is the honest alternative: say "I am about to read my own
-    # mail" and opens are dropped until it expires. See /api/mute.
-    if mute_active():
-        print(f"Muted: dropping open for {email!r}")
-        return send_file(io.BytesIO(PIXEL), mimetype="image/gif", max_age=0, etag=False)
-
     # Still checked, because a non-proxying client (Apple Mail, Outlook desktop)
     # does fetch directly and this catches those.
     try:
