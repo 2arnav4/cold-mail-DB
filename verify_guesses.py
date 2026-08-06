@@ -246,15 +246,29 @@ def main() -> int:
     con.executemany(
         "UPDATE contacts SET is_invalid=1, invalid_reason=? WHERE id=?",
         [(verdicts[cid][1][:32], cid) for cid in remove])
-    # 80: above the send gate, below the published tiers. The receiving server
-    # confirmed the mailbox exists on a domain proven not to be catch-all, so it
-    # will not bounce -- which is the thing being optimised. It stays under
-    # 'published' because the address was still constructed: the mailbox is
-    # real, but nothing here proves it belongs to the person the row names.
+    # A confirmed mailbox always sets email_verified, but the provenance tier
+    # only moves for rows that were guesses.
+    #
+    # 80 for a confirmed guess: above the send gate, below the published tiers.
+    # The receiving server confirmed the mailbox on a domain proven not to be
+    # catch-all, so it will not bounce -- which is the thing being optimised. It
+    # stays under 'published' because the address was still constructed: the
+    # mailbox is real, but nothing proves it belongs to the person named.
     # Must match TIERS['verified_guess'] in score_confidence.py.
+    #
+    # A published address that also passes the probe must NOT be rewritten to
+    # 80 -- that would demote the best evidence in the database to sit below
+    # itself. It keeps provenance and confidence, and gains email_verified,
+    # which is what makes "published AND probed" a distinguishable tier.
     con.executemany(
-        "UPDATE contacts SET email_confidence=80, email_provenance='verified_guess',"
-        " confidence_scored_at=?, email_verified=1 WHERE id=?",
+        """UPDATE contacts SET
+               email_verified = 1,
+               confidence_scored_at = ?,
+               email_provenance = CASE WHEN email_provenance = 'guessed'
+                                       THEN 'verified_guess' ELSE email_provenance END,
+               email_confidence = CASE WHEN email_provenance = 'guessed'
+                                       THEN 80 ELSE email_confidence END
+           WHERE id = ?""",
         [(now, cid) for cid in keep])
     con.commit()
 
