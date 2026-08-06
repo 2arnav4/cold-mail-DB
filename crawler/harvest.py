@@ -132,10 +132,46 @@ class RobotsCache:
             return True
 
 
+def decode_cfemail(hexstr: str) -> str | None:
+    """Decode Cloudflare's email obfuscation.
+
+    Cloudflare rewrites `foo@bar.com` on a protected page into
+    `<a data-cfemail="a1b2c3...">[email&#160;protected]</a>` and restores it with
+    JavaScript. The encoding is XOR with a one-byte key that is the first byte
+    of the hex string itself, so it needs no browser to undo -- and skipping it
+    silently loses every address on a Cloudflare-protected contact page.
+    zerodha.com alone carries 26 of them."""
+    try:
+        raw = bytes.fromhex(hexstr)
+    except ValueError:
+        return None
+    if len(raw) < 2:
+        return None
+    key = raw[0]
+    out = "".join(chr(b ^ key) for b in raw[1:])
+    return out if "@" in out and "." in out else None
+
+
 def extract_emails(html: str, url: str) -> list[dict]:
     """Emails on one page, mailto: links first and marked as stronger evidence."""
     soup = BeautifulSoup(html, "lxml")
     out, seen = [], set()
+
+    # Cloudflare-protected addresses. Treated as mailto-strength: the company
+    # published it as a link and Cloudflare rewrote it, so the evidence that it
+    # was a real published address is identical.
+    for tag in soup.find_all(attrs={"data-cfemail": True}):
+        addr = decode_cfemail(tag.get("data-cfemail", ""))
+        if not addr:
+            continue
+        addr = normalise(addr)
+        if not addr or addr in seen:
+            continue
+        seen.add(addr)
+        parent = tag.find_parent()
+        hint = (parent.get_text(" ", strip=True)[:60] if parent else "")
+        out.append({"email": addr, "hint": hint, "how": "cfemail",
+                    "confidence": 100, "source_url": url})
 
     for tag in soup.find_all("a", href=True):
         href = tag["href"].strip()
