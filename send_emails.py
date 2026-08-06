@@ -63,7 +63,22 @@ CONFIG = {
     "template_path": "template.txt",
     "log_path": "sent_log.json",
     "daily_limit": 100,
+    # Two URLs for the same service, and they are not interchangeable.
+    #
+    # tracker_url is the API endpoint the sender calls: log_send, bulk_sync,
+    # stats. It must point at Render directly.
+    #
+    # tracker_public_url is what gets embedded in the mail itself, so it is the
+    # hostname a recipient's mail client resolves. Serving that from
+    # arnav24.tech keeps the links on the same domain as the signature instead
+    # of onrender.com, which is shared with every other free Render user.
+    #
+    # They were briefly the same value, which routed the API calls through the
+    # Vercel rewrite; that rewrite only covers /t/ and /c/, so /api/bulk_sync
+    # fell through to the SPA catch-all and returned index.html with a 405.
     "tracker_url": _os.environ.get("TRACKER_URL", ""),
+    "tracker_public_url": (_os.environ.get("TRACKER_PUBLIC_URL", "")
+                           or _os.environ.get("TRACKER_URL", "")),
     "tracker_secret": _os.environ.get("TRACKER_SECRET", ""),
     # Lowest email_confidence worth mailing. score_confidence.py writes 15 for
     # addresses a pattern generator invented (firstname@domain) and 75+ for
@@ -673,8 +688,8 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
         final_subject = render(subject, contact)
         final_body = render(body, contact)
 
-    # Build tracking pixel tag if TRACKER_URL is configured
-    tracker_url = cfg.get("tracker_url", "").rstrip("/")
+    # Built from the public URL: this string ends up in the recipient's inbox.
+    tracker_url = cfg.get("tracker_public_url", "").rstrip("/")
     pixel_tag = ""
     if tracker_url:
         import base64 as _b64

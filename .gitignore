@@ -51,6 +51,7 @@ sent_log_bounce_state.json
 sent_log_failed.json
 sent_log_opens.json
 sent_log.json
+tracker_sync.log
 venv/
 verifier/verifier
 verify_results_*.csv
