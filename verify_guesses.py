@@ -212,23 +212,24 @@ def main() -> int:
                 if i % 100 == 0:
                     print(f"  smtp {i:>5}/{len(pending)}", flush=True)
 
-    tally = Counter(reason for _, reason in verdicts.values())
     remove = [cid for cid, (ok, _) in verdicts.items() if ok is False]
     keep = [cid for cid, (ok, _) in verdicts.items() if ok is True]
     hold = [cid for cid, (ok, _) in verdicts.items() if ok is None]
 
+    # Tally per verdict bucket, not globally. A global tally attributed every
+    # reason named 'smtp' to the remove line, so a run that rejected 103
+    # addresses and confirmed 4,628 printed "remove 132 ... smtp=4731" -- the
+    # counts were right and the reasons beside them were nonsense.
+    def reasons_for(ids) -> str:
+        t = Counter(verdicts[cid][1] for cid in ids)
+        return ", ".join(f"{k}={v}" for k, v in t.most_common())
+
     print(f"\n{'verdict':<12}{'count':>8}   reasons")
-    print("-" * 66)
-    print(f"{'remove':<12}{len(remove):>8}   "
-          + ", ".join(f"{k}={v}" for k, v in tally.items()
-                      if k in ("malformed", "bounce", "no_mx", "smtp", "invalid")))
-    print(f"{'keep':<12}{len(keep):>8}   confirmed by probe")
-    print(f"{'hold':<12}{len(hold):>8}   "
-          + ", ".join(f"{k}={v}" for k, v in tally.items()
-                      if k in ("undetermined", "dns_inconclusive",
-                               "catchall_unverifiable", "smtp_inconclusive",
-                               "catchall_inconclusive")))
-    print("-" * 66)
+    print("-" * 72)
+    print(f"{'remove':<12}{len(remove):>8}   {reasons_for(remove)}")
+    print(f"{'keep':<12}{len(keep):>8}   {reasons_for(keep)}")
+    print(f"{'hold':<12}{len(hold):>8}   {reasons_for(hold)}")
+    print("-" * 72)
     print(f"{'total':<12}{len(verdicts):>8}")
 
     if not args.smtp:
