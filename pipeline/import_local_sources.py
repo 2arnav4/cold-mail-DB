@@ -28,10 +28,16 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# This script lives one directory below the repo root, but the database, the
+# sent logs and the shared modules all sit at the root. Resolve it explicitly
+# rather than relying on the working directory, so the script behaves the same
+# from cron, from an editor, or from anywhere on the filesystem.
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
 from crawler.db import connect, ensure_schema, upsert_company, upsert_contact, clean_domain  # noqa: E402
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 EMAIL_RE = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+")
 
 SOURCES = ["hr-database/*.csv", "hr-database/*.xlsx", "data_sources/*.xlsx", "*.xlsx"]

@@ -1,0 +1,41 @@
+backup: turso-full.db.backup-verify-20260806-212528
+
+4606 addresses with provenance 'verified_guess'
+  settled offline : 1
+  domains to check: 2440
+
+  dns   250/2440  dead=0
+  dns   500/2440  dead=0
+  dns   750/2440  dead=0
+  dns  1000/2440  dead=0
+  dns  1250/2440  dead=0
+  dns  1500/2440  dead=0
+  dns  1750/2440  dead=0
+  dns  2000/2440  dead=0
+  dns  2250/2440  dead=0
+
+smtp probing 4551 addresses (catch-all and Google-hosted will still come back unknown)
+  [SMTP] connection to mx1.hc1521-52.ap.iphmx.com failed: Connection unexpectedly closed: [Errno 54] Connection reset by peer
+  smtp   100/4551
+  smtp   200/4551
+  smtp   300/4551
+  smtp   400/4551
+  smtp   500/4551
+  smtp   600/4551
+  [SMTP] policy rejection, not a dead mailbox: b'5.7.1 The user or domain that you are sending to (or from) has a policy that\n5.7.1 prohibi'
+  [SMTP] connection to aspmx.l.google.com failed: Connection unexpectedly closed: timed out
+  [SMTP] connection to aspmx.l.google.com failed: Connection unexpectedly closed: timed out
+  smtp   700/4551
+  [SMTP] connection to aspmx.l.google.com failed: Connection unexpectedly closed: timed out
+  smtp   800/4551
+  smtp   900/4551
+  smtp  1000/4551
+  smtp  1100/4551
+  [SMTP] connection to ALT.ASPMX.L.GOOGLE.COM failed: [Errno 8] nodename nor servname provided, or not known
+  smtp  1200/4551
+  smtp  1300/4551
+  smtp  1400/4551
+  [SMTP] connection to mail.protonmail.ch failed: Connection unexpectedly closed: timed out
+  smtp  1500/4551
+  [SMTP] connection to aspmx.l.google.com failed: Connection unexpectedly closed: timed out
+  smtp  1600/4551

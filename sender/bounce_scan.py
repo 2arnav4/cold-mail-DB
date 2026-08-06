@@ -8,10 +8,15 @@ and also re-syncs all historical data (bulk_sync) in case Render restarted.
 import sys
 import os
 
-# Make sure we run from the project directory
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# This file moved into sender/, so its own directory is no longer the project
+# root. chdir'ing there left sent_log.json and turso-full.db unresolvable and
+# send_emails unimportable; both live one level up.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(ROOT)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-from send_emails import CONFIG, check_and_sync_bounces, sync_tracker_from_logs
+from send_emails import CONFIG, check_and_sync_bounces, sync_tracker_from_logs  # noqa: E402
 
 if __name__ == "__main__":
     cfg = CONFIG.copy()

@@ -1,0 +1,7 @@
+[2026-08-06 21:42] probing 250 (7992 still unverified overall)
+  rate 30/min, 3 workers, 3.0s per-domain gap
+  [SMTP] connection to smtp.google.com failed: Connection unexpectedly closed: timed out
+  done in 8.5m  (29/min actual)
+    alive                     141
+    catchall_unverifiable     108
+    catchall_inconclusive     1

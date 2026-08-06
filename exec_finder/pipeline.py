@@ -13,6 +13,7 @@ This is a transparency tool, not a growth-hacking one: every row in the
 output records *how* (or whether) an email was found, specifically so the
 weak points are visible rather than hidden behind a clean-looking result.
 """
+
 import argparse
 import csv
 import sys
@@ -42,55 +43,84 @@ def run_for_company(company: str, domain: str) -> list[dict]:
     except Exception as e:
         print(f"  [pipeline] site scrape failed: {e}")
         published = []
-    print(f"  -> found {len(published)} published address(es) "
-          f"({sum(1 for p in published if p['is_generic'])} generic)")
+    print(
+        f"  -> found {len(published)} published address(es) "
+        f"({sum(1 for p in published if p['is_generic'])} generic)"
+    )
 
     published_emails = {p["email"].lower() for p in published}
 
     for person in people:
         name, title, confidence = person["name"], person["title"], person["confidence"]
         match = next(
-            (p for p in published
-             if name.split()[0].lower() in (p.get("name_hint") or "").lower()
-             or name.split()[-1].lower() in (p.get("name_hint") or "").lower()),
+            (
+                p
+                for p in published
+                if name.split()[0].lower() in (p.get("name_hint") or "").lower()
+                or name.split()[-1].lower() in (p.get("name_hint") or "").lower()
+            ),
             None,
         )
 
         if match:
-            rows.append({
-                "company": company, "name": name, "title": title,
-                "llm_confidence": confidence, "email": match["email"],
-                "source": f"published:{match['source_url']}",
-            })
+            rows.append(
+                {
+                    "company": company,
+                    "name": name,
+                    "title": title,
+                    "llm_confidence": confidence,
+                    "email": match["email"],
+                    "source": f"published:{match['source_url']}",
+                }
+            )
             continue
 
-        print(f"[3/3] No published match for {name!r} — trying pattern-guess + verify...")
+        print(
+            f"[3/3] No published match for {name!r} — trying pattern-guess + verify..."
+        )
         result = find_email(name, domain)
-        rows.append({
-            "company": company, "name": name, "title": title,
-            "llm_confidence": confidence,
-            "email": result["email"] or "NOT_FOUND",
-            "source": (f"pattern_verified:{result['checked_by']}"
-                       if result["email"] else
-                       f"unresolved (tried {result['candidates_tried']} patterns)"),
-        })
+        rows.append(
+            {
+                "company": company,
+                "name": name,
+                "title": title,
+                "llm_confidence": confidence,
+                "email": result["email"] or "NOT_FOUND",
+                "source": (
+                    f"pattern_verified:{result['checked_by']}"
+                    if result["email"]
+                    else f"unresolved (tried {result['candidates_tried']} patterns)"
+                ),
+            }
+        )
 
     # Any published, non-generic addresses the LLM step didn't already surface.
     matched_emails = {r["email"].lower() for r in rows if r["email"] != "NOT_FOUND"}
     for p in published:
         if p["is_generic"] or p["email"].lower() in matched_emails:
             continue
-        rows.append({
-            "company": company, "name": p.get("name_hint") or "(unknown)",
-            "title": "", "llm_confidence": "n/a", "email": p["email"],
-            "source": f"published:{p['source_url']}",
-        })
+        rows.append(
+            {
+                "company": company,
+                "name": p.get("name_hint") or "(unknown)",
+                "title": "",
+                "llm_confidence": "n/a",
+                "email": p["email"],
+                "source": f"published:{p['source_url']}",
+            }
+        )
 
     if not rows:
-        rows.append({
-            "company": company, "name": "", "title": "", "llm_confidence": "",
-            "email": "NOT_FOUND", "source": "no leads from any stage",
-        })
+        rows.append(
+            {
+                "company": company,
+                "name": "",
+                "title": "",
+                "llm_confidence": "",
+                "email": "NOT_FOUND",
+                "source": "no leads from any stage",
+            }
+        )
 
     return rows
 
@@ -125,8 +155,10 @@ def main():
         writer.writerows(all_rows)
 
     resolved = sum(1 for r in all_rows if r["email"] != "NOT_FOUND")
-    print(f"\nDone. {resolved}/{len(all_rows)} rows resolved to an email. "
-          f"Written to {args.output}")
+    print(
+        f"\nDone. {resolved}/{len(all_rows)} rows resolved to an email. "
+        f"Written to {args.output}"
+    )
 
 
 if __name__ == "__main__":

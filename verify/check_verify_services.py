@@ -29,7 +29,13 @@ def _load_env(path=".env"):
 
 _load_env()
 
-from email_verify import verify_smtp, is_catchall_domain
+# This file moved into verify/, so the shared modules one level up are no longer
+# importable by name. Resolve the repo root explicitly.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from email_verify import verify_smtp, is_catchall_domain  # noqa: E402
 
 TEST_EMAIL = sys.argv[1] if len(sys.argv) > 1 else "singlaarnav2405@gmail.com"
 

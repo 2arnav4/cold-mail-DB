@@ -40,8 +40,13 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+# This script lives one directory below the repo root, but the database, the
+# sent logs and the shared modules all sit at the root. Resolve it explicitly
+# rather than relying on the working directory, so the script behaves the same
+# from cron, from an editor, or from anywhere on the filesystem.
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 
 import sqlite3  # noqa: E402
 
