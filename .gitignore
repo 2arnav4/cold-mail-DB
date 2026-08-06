@@ -43,3 +43,18 @@ add_new_hr_contacts.py
 # Local sqlite WAL sidecars
 *.db-shm
 *.db-wal
+
+# ── outreach/ (tier one: per-company email + deck) ────────────────────────────
+outreach/node_modules/
+# Build artifacts. send.json carries the recipient address, decks are personal.
+outreach/out/
+# GitHub API digests, regenerate with `npm run research`.
+outreach/research/
+# Company files carry recipient names and addresses. Same rule as hr-database/.
+outreach/companies/*.yaml
+!outreach/companies/_template.yaml
+!outreach/companies/example-northwind.yaml
+
+# Crawler run logs
+harvest_run.log
+*_run.log

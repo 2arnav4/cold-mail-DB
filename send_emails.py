@@ -65,6 +65,24 @@ CONFIG = {
     "daily_limit": 100,
     "tracker_url": _os.environ.get("TRACKER_URL", ""),
     "tracker_secret": _os.environ.get("TRACKER_SECRET", ""),
+    # Lowest email_confidence worth mailing. score_confidence.py writes 15 for
+    # addresses a pattern generator invented (firstname@domain) and 75+ for
+    # ones that were actually found somewhere. Mailing the 15s is what produced
+    # the 811 entries in sent_log_failed.json, so they stay out of the queue
+    # until find_real_emails.py replaces them with a published address.
+    "min_confidence": 75,
+    # Attach the resume PDF to a first cold email, or link it in the body.
+    # An attachment from an unknown sender raises the spam score, and the
+    # generated batch emails already carry arnav24.tech/resume.pdf as a link,
+    # so attaching as well sends the same document twice. Decks in
+    # OUTREACH_DECKS are unaffected: those are the tier-one sends where the
+    # attachment is the point.
+    "attach_resume": False,
+    # Restrict a run to one evidence tier. "" means every tier at or above
+    # min_confidence. Set to "published" for a low-bounce batch: those addresses
+    # were read off the company's own website, where the list tier is bought
+    # data that is now several months stale.
+    "send_provenance": "",
 }
 
 
@@ -94,285 +112,150 @@ def tracker_headers(cfg: dict, content_type: str = "") -> dict:
 #  Value = { "subject": "...", "body": "..." }
 #  For any contact NOT in this dict, the generic template.txt is used.
 # ─────────────────────────────────────────────────────────────────────────────
-PERSONALIZED_EMAILS = {
-    "xinwei@traceroot.ai": {
-        "subject": "Your agent broke in prod. Now what?",
-        "body": """Hi Xinwei,
+# Recipient copy lives in personalized_emails.local.json, which is gitignored.
+# This repository is public, and the dict held named individuals' work
+# addresses as keys. A local file keeps the same behaviour without publishing
+# who is being contacted -- the same reason outreach/.gitignore excludes out/.
+PERSONALIZED_EMAILS = {}
 
-Most agent tooling stops at a dashboard. Root-causing a failure against real source and GitHub history, then opening a PR that gets evaluated, is a much harder thing to build. That's why I'm writing.
 
-I'm a third-year CSE student in Delhi. I built Pulse: Node/Express, 14 REST endpoints, JWT auth, rate limiting, Postgres, Groq for standup generation. I also write Go and contribute to open source.
+def _load_personalized(path="personalized_emails.local.json"):
+    """Merge the local recipient copy in, if present. Absent file is fine:
+    contacts without an entry fall through to the sector template."""
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+    if not os.path.exists(full):
+        return 0
+    try:
+        with open(full, encoding="utf-8") as f:
+            PERSONALIZED_EMAILS.update(json.load(f))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  WARNING: {path} unreadable, ignoring ({exc})")
+        return 0
+    return len(PERSONALIZED_EMAILS)
 
-TraceRoot is open source. I'd rather spend a summer shipping into a repo people read than an internal tool nobody sees.
 
-Resources:
-• GitHub: https://github.com/2arnav4
-• Portfolio: https://arnav24.tech
+_load_personalized()
 
-Resume attached.
+# ─────────────────────────────────────────────────────────────────────────────
+#  TIER ONE: outreach/ decks
+#
+#  outreach/ builds a per-company email and a five slide technical deck, then
+#  writes outreach/out/<slug>/send.json. Those are merged into
+#  PERSONALIZED_EMAILS below so they ride this sender, its daily cap, the
+#  tracker and the bounce handling rather than a second delivery path.
+#
+#  The deck path travels with them in OUTREACH_DECKS, and build_email attaches
+#  it alongside the resume. A contact with a deck gets two attachments; every
+#  other contact is untouched.
+#
+#  Hand written entries in PERSONALIZED_EMAILS win on conflict, because those
+#  were typed deliberately and a stale build should never silently replace one.
+# ─────────────────────────────────────────────────────────────────────────────
+OUTREACH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outreach", "out")
+OUTREACH_DECKS = {}
 
-Arnav""",
-    },
-    "sandeep@cairhealth.com": {
-        "subject": "Claims accuracy beats model fluency",
-        "body": """Hi Sandeep,
 
-Claims are high volume, the rules shift constantly, and one wrong answer costs real money. That makes accuracy a harder engineering problem than fluency, and most LLM tooling optimizes for the wrong one.
+def load_outreach_sends(directory: str = OUTREACH_DIR) -> tuple:
+    """Read outreach/out/*/send.json. Returns ({email: {...}}, {email: deck_path})."""
+    emails, decks = {}, {}
+    if not os.path.isdir(directory):
+        return emails, decks
 
-I'm a third-year CSE student in Delhi. I built Lucent FinTech, pulling live data from Finnhub, MarketStack and CoinMarketCap. Reconciling three APIs that regularly disagree taught me more about data accuracy than any tutorial did.
+    for slug in sorted(os.listdir(directory)):
+        path = os.path.join(directory, slug, "send.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"  WARNING: outreach/out/{slug}/send.json unreadable, skipping ({exc})")
+            continue
 
-React/TypeScript, Node, Postgres, Mongo. Happy to start on the unglamorous parts of the pipeline.
+        addr = (payload.get("recipient_email") or "").strip().lower()
+        if not addr or not payload.get("subject") or not payload.get("body"):
+            print(f"  WARNING: outreach/out/{slug}/send.json is incomplete, skipping")
+            continue
 
-Resources:
-• GitHub: https://github.com/2arnav4
-• Portfolio: https://arnav24.tech
+        emails[addr] = {"subject": payload["subject"], "body": payload["body"]}
 
-Resume attached.
+        deck = payload.get("deck")
+        # A missing deck is not fatal. The email is still better than the
+        # generic template, and refusing to send would be the wrong tradeoff.
+        if deck and os.path.exists(deck):
+            decks[addr] = deck
+        elif deck:
+            print(f"  WARNING: deck missing for {addr} at {deck}, sending without it")
 
-Arnav""",
-    },
-    "sean@relixir.ai": {
-        "subject": "Internship Opportunity – Relixir",
-        "body": """I've been following Relixir since the YC batch announcement. The pivot from traditional SEO to Generative Engine Optimization is the right call. As AI-driven search takes share from Google, brands that don't adapt now will be invisible in two years. The autonomous content publishing and GEO-optimized refresh cycle is a sharp product decision.
+    return emails, decks
 
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
 
-That kind of AI-in-product, production-ready thinking is what your engineering team needs. I'd love to spend a summer helping Relixir build the infrastructure that keeps brands visible in an AI-first world.
+def install_outreach_sends():
+    """Merge tier one sends in without clobbering hand written entries."""
+    emails, decks = load_outreach_sends()
+    added = 0
+    for addr, payload in emails.items():
+        if addr in PERSONALIZED_EMAILS:
+            print(f"  NOTE: {addr} is hand written in PERSONALIZED_EMAILS, keeping that over the outreach build")
+            continue
+        PERSONALIZED_EMAILS[addr] = payload
+        OUTREACH_DECKS[addr] = decks.get(addr)
+        added += 1
+    if added:
+        with_deck = sum(1 for a in OUTREACH_DECKS.values() if a)
+        print(f"  Loaded {added} outreach email(s), {with_deck} with a deck attached")
+    return added
 
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Pulse (Live): https://pulse-nu-liard.vercel.app
-• Pulse (Code): https://github.com/2arnav4/Pulse""",
-    },
-    "vimal@kalam.in": {
-        "subject": "Internship Opportunity – SuperKalam",
-        "body": """SuperKalam's approach to UPSC prep - treating it as a GPS navigation problem rather than a content firehose - is the right mental model. AI-driven personalized study paths with daily accountability streaks solve the consistency problem that kills most serious aspirants.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I'm comfortable across your full stack (Next.js, Node, PostgreSQL) and excited to work on the kind of product that genuinely changes outcomes for students.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Student Helper (Live): https://student-helper-yaye.vercel.app
-• Student Helper (Code): https://github.com/2arnav4/Student-Helper""",
-    },
-    "rajiv@opoyi.com": {
-        "subject": "Internship Opportunity – Opoyi",
-        "body": """Opoyi's core thesis - trusted, personalized news without the misinformation problem of social feeds - is an important one. The product-first editorial approach shows in how the platform is built. The AI/ML-driven curation layer is what makes it genuinely different from a standard news aggregator.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-Your stack (React, Node, Python) is what I work in daily. I'd love to contribute to the product in Delhi/NCR.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Pulse (Live): https://pulse-nu-liard.vercel.app""",
-    },
-    "nitish@paasa.co": {
-        "subject": "Internship Opportunity – Paasa",
-        "body": """Paasa's goal of giving Indian HNIs a Zerodha-equivalent experience for global equities - with IBKR custody, automated compliance, and RSU diversification built-in - is a product gap that's been sitting open for a long time. The YC S24 backing validates the timing.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-Building financial interfaces that users trust requires getting both data accuracy and UX right. I'd love to spend a summer helping Paasa deliver that.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Lucent FinTech (Live): https://lucent-fintech-psi.vercel.app
-• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech""",
-    },
-    "gaurav@trytejas.ai": {
-        "subject": "Internship Opportunity – Tejas AI",
-        "body": """Tejas AI's focus on AI-powered credit policy automation for banks is a meaty engineering problem. Turning months-long credit-rule update cycles into a fast, data-driven workflow that reduces default rates is exactly the kind of platform-level work that compounds. The YC W25 backing is well-deserved.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-AI agents that help financial institutions make faster, more reliable decisions need both robust backends and clean interfaces. I'd love to contribute to that at Tejas.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Lucent FinTech (Live): https://lucent-fintech-psi.vercel.app
-• Lucent FinTech (Code): https://github.com/2arnav4/Lucent-Fintech""",
-    },
-    "fyoraaipvtltd@gmail.com": {
-        "subject": "Internship Opportunity – Fyora AI",
-        "body": """Fyora AI's direction in autonomous AI agents - handling multi-step workflow orchestration, real-time monitoring, and data aggregation - is where serious enterprise automation is headed. The in-office, product-first environment in New Delhi is exactly the kind of setup I'm looking for.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I built Pulse - a collaboration platform with role-based workspaces and Groq AI-powered standup generation. The backend is Node/Express with PostgreSQL (14 REST endpoints, JWT auth, rate limiting) and the frontend is React with reusable component architecture. I'm also experienced with MongoDB from building Student Helper.
-
-Your stack - React, Next.js, Django, MongoDB - maps closely to my day-to-day. I'd be excited to contribute to Fyora AI's roadmap.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
-• Pulse (Live): https://pulse-nu-liard.vercel.app""",
-    },
-    "careers@uipath.com": {
-        "subject": "Internship Opportunity – UiPath",
-        "body": """UiPath's bet on agentic automation - combining RPA with AI orchestration to handle exception-heavy, unstructured workflows - is the right next step for enterprise automation. The transition from recording UI interactions to reasoning about multi-step processes is a meaningful technical leap.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-Scalable automation that handles real-world complexity requires clean architecture and reliable backend services. I'd love to contribute to that engineering challenge at UiPath.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@kenko.health": {
-        "subject": "Internship Opportunity – Kenko Health",
-        "body": """Kenko's mission to make health insurance radically more accessible and actually useful - with instant claims, no TPA friction, and wellness incentives baked in - is fixing one of the most broken consumer experiences in India.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I understand the importance of building products where users need to trust every interaction - especially around health data, access, and thinking through the nuances of healthcare workflows.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@pitchline.com": {
-        "subject": "Internship Opportunity – Pitchline",
-        "body": """Pitchline's focus on democratizing better sales pitches caught my attention. Using AI to help founders and salespeople communicate better is a high-impact problem.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Pulse, a team workspace platform that integrates Groq AI for standup generation. Wiring up AI APIs, managing async operations, and delivering results cleanly is core to what Pitchline does.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@dpdzero.com": {
-        "subject": "Internship Opportunity – DPDZero",
-        "body": """DPDZero's focus on data infrastructure for analytics caught my attention. Building systems that process and visualize data reliably is technically fascinating and business-critical.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Lucent FinTech - a finance dashboard tracking stocks in real time via Finnhub and MarketStack, with custom visualizations and optimized caching. The kind of data handling and UI complexity that data platforms demand.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@carboncrunch.com": {
-        "subject": "Internship Opportunity – Carbon Crunch",
-        "body": """Carbon Crunch's mission to tackle climate challenges resonated. Building technology for sustainability is exactly the kind of high-impact work I want to be part of.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Pulse - a collaboration platform with real-time data management and responsive UI. The same architectural thinking applies to climate tech where data accuracy and user engagement drive real-world impact.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@reducate.ai": {
-        "subject": "Internship Opportunity – Reducate.ai",
-        "body": """Reducate.ai's focus on AI-powered learning immediately clicked. Building personalized education experiences at scale is a problem I care deeply about.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Student Helper - a MERN platform serving 150+ students with notes sharing, a writer marketplace, and engagement workflows. The same product thinking applies to Reducate's mission.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@solvusai.com": {
-        "subject": "Internship Opportunity – SolvusAI",
-        "body": """SolvusAI's focus on GenAI solutions caught my attention. Building AI-powered automation that solves real business problems is exactly the kind of engineering I'm passionate about.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Pulse, a team workspace platform that integrates Groq AI for standup generation. Understanding how to architect AI features end-to-end, from prompt engineering to UI presentation, is core to my expertise.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@biztel.ai": {
-        "subject": "Internship Opportunity – Biztel.AI",
-        "body": """Biztel.AI's mission to automate business workflows using AI agents resonated. Building systems that intelligently handle repetitive business tasks is compelling technically and impactful business-wise.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Pulse - a platform with AI-generated standup summaries and role-based workflows. The same end-to-end thinking applies to business automation.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@hunchbite.com": {
-        "subject": "Internship Opportunity – Hunchbite",
-        "body": """Hunchbite's "production-grade in 14 days" studio model - fixed-price, end-to-end ownership, fast MVPs for startups - is a high-discipline way to run a dev shop. That kind of velocity requires developers who can context-switch quickly, write clean code under time pressure, and own features without hand-holding.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I'd love to contribute to Hunchbite's studio and grow fast by shipping real products for real clients.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-    "careers@softsensor.ai": {
-        "subject": "Internship Opportunity – SoftSensor AI",
-        "body": """SoftSensor AI's focus on full-stack AI and ML solutions aligned with my growth direction. I'm actively building expertise across data handling, ML integration, and shipping complete systems end-to-end.
-
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I work across the MERN stack — React with TypeScript and Next.js on the front end, Node.js and Express on the back end, PostgreSQL and MongoDB for data. I also write Go and contribute to open-source across JavaScript, TypeScript, and Go ecosystems.
-
-I built Lucent FinTech, which tracks stocks and crypto assets in real time and integrates Gemini AI for financial insights. Combining full-stack development with AI integration is where I'm headed.
-
-Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3""",
-    },
-}
 
 # ─────────────────────────────────────────────
 #  Contact filter — adjust to target who you want
+#
+#  Two gates, doing different jobs.
+#
+#  `min_confidence` is about evidence: below it, nobody ever saw the address --
+#  it was generated as firstname@domain. Mailing those is what filled
+#  sent_log_failed.json with 811 entries.
+#
+#  The ROW_NUMBER filter is about restraint: a company can hold several real
+#  people, and mailing two of them at a five-person startup reads as a
+#  mailmerge and burns the company on the first attempt. One per company, the
+#  best-evidenced one, and the runner-up stays in the database untouched for a
+#  later cycle rather than being deleted.
 # ─────────────────────────────────────────────
 CONTACT_QUERY = """
-    SELECT
-        ct.id        AS contact_id,
-        ct.name      AS contact_name,
-        ct.role      AS contact_role,
-        ct.email     AS contact_email,
-        co.id        AS company_id,
-        co.name      AS company_name,
-        co.domain    AS company_domain,
-        co.industry  AS company_industry,
-        co.sector    AS company_sector,
-        co.funding_stage AS funding_stage
-    FROM contacts ct
-    JOIN companies co ON ct.company_id = co.id
-    WHERE
-        ct.email IS NOT NULL
-        AND ct.is_invalid = 0
-        AND ct.email != ''
-    ORDER BY ct.priority DESC, ct.id ASC
+    WITH ranked AS (
+        SELECT
+            ct.id        AS contact_id,
+            ct.name      AS contact_name,
+            ct.role      AS contact_role,
+            ct.email     AS contact_email,
+            ct.email_confidence AS email_confidence,
+            ct.email_provenance AS email_provenance,
+            ct.priority  AS priority,
+            co.id        AS company_id,
+            co.name      AS company_name,
+            co.domain    AS company_domain,
+            co.industry  AS company_industry,
+            co.sector    AS company_sector,
+            co.funding_stage AS funding_stage,
+            ROW_NUMBER() OVER (
+                PARTITION BY ct.company_id
+                ORDER BY ct.email_confidence DESC,
+                         ct.priority DESC,
+                         ct.id ASC
+            ) AS rn
+        FROM contacts ct
+        JOIN companies co ON ct.company_id = co.id
+        WHERE
+            ct.email IS NOT NULL
+            AND ct.is_invalid = 0
+            AND ct.email != ''
+            AND COALESCE(ct.email_confidence, 0) >= :min_confidence
+            AND (:provenance = '' OR ct.email_provenance = :provenance)
+    )
+    SELECT * FROM ranked
+    WHERE rn = 1
+    ORDER BY email_confidence DESC, priority DESC, contact_id ASC
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -770,6 +653,16 @@ def wrap_links(text, email, company, tracker_url, secret=""):
     return re.sub(url_pattern, replace_url, text)
 
 
+def attach_file(msg: MIMEMultipart, path: str):
+    """Base64 a file onto the outer mixed container as a named attachment."""
+    with open(path, "rb") as f:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f'attachment; filename="{os.path.basename(path)}"')
+    msg.attach(part)
+
+
 def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultipart:
     # Use personalized email if we have one for this exact address
     personalized = PERSONALIZED_EMAILS.get(contact["contact_email"])
@@ -807,20 +700,23 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     alt.attach(MIMEText(text_to_html(html_body, pixel_tag), "html", "utf-8"))
     msg.attach(alt)
 
-    # Attach resume if it exists
+    # Attach the resume only when asked for. A contact carrying a deck always
+    # gets it, because a deck without the resume beside it reads as incomplete.
     resume_path = cfg["resume_path"]
-    if os.path.exists(resume_path):
-        with open(resume_path, "rb") as f:
-            part = MIMEBase("application", "octet-stream")
-            part.set_payload(f.read())
-        encoders.encode_base64(part)
-        filename = os.path.basename(resume_path)
-        part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
-        msg.attach(part)
-    else:
-        print(
-            f"  WARNING: Resume not found at '{resume_path}' — sending without attachment"
-        )
+    has_deck = bool(OUTREACH_DECKS.get(contact["contact_email"].strip().lower()))
+    if cfg.get("attach_resume", True) or has_deck:
+        if os.path.exists(resume_path):
+            attach_file(msg, resume_path)
+        else:
+            print(
+                f"  WARNING: Resume not found at '{resume_path}' — sending without attachment"
+            )
+
+    # Tier one contacts also carry a per-company deck. The resume goes first so
+    # the familiar attachment is the one the reader sees at the top.
+    deck_path = OUTREACH_DECKS.get(contact["contact_email"].strip().lower())
+    if deck_path and os.path.exists(deck_path):
+        attach_file(msg, deck_path)
 
     return msg
 
@@ -890,11 +786,27 @@ def load_contacts_from_csv(csv_path: str) -> list:
     return contacts
 
 
-def fetch_contacts(db_path: str) -> list:
+def fetch_contacts(db_path: str, min_confidence: int = None,
+                   provenance: str = None) -> list:
+    """Contacts eligible to be mailed, best-evidenced address first, one per company.
+
+    `min_confidence` gates on evidence, not on deliverability: an address below
+    it was never found anywhere, only generated, so there is nothing for the
+    SMTP probe downstream to be right about.
+
+    `provenance` narrows further to a single tier. Passing 'published' restricts
+    the run to addresses read off a company's own website, which is the lowest
+    bounce risk available -- worth using for a small batch where a bad send is
+    expensive."""
+    if min_confidence is None:
+        min_confidence = CONFIG.get("min_confidence", 0)
+    if provenance is None:
+        provenance = CONFIG.get("send_provenance", "")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute(CONTACT_QUERY)
+    cur.execute(CONTACT_QUERY, {"min_confidence": min_confidence,
+                                "provenance": provenance or ""})
     rows = [dict(row) for row in cur.fetchall()]
     conn.close()
     return rows
@@ -1354,6 +1266,13 @@ def main():
         help="Show the next contacts that would be emailed and exit",
     )
     parser.add_argument(
+        "--only-personalized",
+        action="store_true",
+        help="Only mail contacts that have a written email in PERSONALIZED_EMAILS "
+             "or outreach/out/. Without this the queue is ordered by confidence "
+             "and will reach different people than the batch was written for.",
+    )
+    parser.add_argument(
         "--check-bounces",
         action="store_true",
         help="Check Gmail for bounced emails, sync them to logs, clean DB, and exit",
@@ -1460,6 +1379,7 @@ def main():
     sector_templates = load_sector_templates()
     if sector_templates:
         print(f"  Sector templates loaded: {', '.join(sorted(sector_templates))}")
+    install_outreach_sends()
     if not subject_template:
         print("ERROR: Template missing 'Subject:' line on the first line.")
         sys.exit(1)
@@ -1484,6 +1404,19 @@ def main():
     # Filter out already-sent
     queue = [c for c in all_contacts if not already_sent(excluded, c["contact_email"])]
     print(f"  Unsent contacts     : {len(queue)}")
+
+    # Restrict the run to contacts that have a hand-written or generated email.
+    #
+    # CONTACT_QUERY orders by confidence, while the batch generator ranks on
+    # mailbox quality first, so the two disagree about who comes next: the
+    # sender's first 30 and the 31 generated emails had zero addresses in
+    # common. Without this flag a run intended to send researched mail sends
+    # the generic template to a completely different set of people.
+    if args.only_personalized:
+        before = len(queue)
+        queue = [c for c in queue
+                 if c["contact_email"].strip().lower() in PERSONALIZED_EMAILS]
+        print(f"  With a written email: {len(queue)}  (skipped {before - len(queue)})")
 
     if args.show_queue:
         print(f"\n  Next {min(quota_left, 20)} in queue:")
