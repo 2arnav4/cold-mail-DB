@@ -59,12 +59,18 @@ if [ -z "$LIMIT" ]; then
   exit 0
 fi
 
-PACE=()
-# --rate-per-hour, not --per-hour. Getting this wrong once cost a run: argparse
-# rejected the unknown flag, send_emails exited 2 before sending anything, and
-# the stages below carried on printing DONE over the top of the failure.
-[ -n "$PER_HOUR" ] && PACE=(--rate-per-hour "$PER_HOUR")
-$PY -u send_emails.py --only-personalized --limit "$LIMIT" "${PACE[@]}" 2>&1 | tee -a "$LOG"
+# Two spelled-out branches rather than building an argument array. macOS ships
+# bash 3.2, where expanding an empty array as "${arr[@]}" under `set -u` is an
+# unbound-variable error, so the tidy version aborts the run whenever no pace
+# is given. Not worth being clever about.
+#
+# The flag is --rate-per-hour, not --per-hour: argparse rejects the latter and
+# send_emails exits 2 before sending anything.
+if [ -n "$PER_HOUR" ]; then
+  $PY -u send_emails.py --only-personalized --limit "$LIMIT" --rate-per-hour "$PER_HOUR" 2>&1 | tee -a "$LOG"
+else
+  $PY -u send_emails.py --only-personalized --limit "$LIMIT" 2>&1 | tee -a "$LOG"
+fi
 
 # tee is the last command in the pipe, so $? is tee's status and always 0.
 # PIPESTATUS[0] is the sender's. Without this the script reports success for a
