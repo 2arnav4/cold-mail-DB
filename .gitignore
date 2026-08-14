@@ -61,3 +61,6 @@ verify_results*.csv
 # lost months ago can still be answered for -- which means it holds real
 # people's names and addresses, and must never reach the repo.
 reports/attribution-cleared-*.csv
+
+# Written drafts: real founders' addresses plus unsent copy.
+drafts-*.json
