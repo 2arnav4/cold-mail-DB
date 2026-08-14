@@ -56,3 +56,8 @@ venv/
 verifier/verifier
 verify_results_*.csv
 verify_results*.csv
+
+# What recheck_attribution.py cleared, one row per contact. Written so a name
+# lost months ago can still be answered for -- which means it holds real
+# people's names and addresses, and must never reach the repo.
+reports/attribution-cleared-*.csv

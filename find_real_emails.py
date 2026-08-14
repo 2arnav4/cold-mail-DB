@@ -44,6 +44,9 @@ sys.path.insert(0, os.path.join(HERE, "exec_finder"))
 
 from site_scraper import scrape_company_site  # noqa: E402
 
+sys.path.insert(0, HERE)
+from pipeline.attribution import corroborates, is_label  # noqa: E402
+
 DB = os.path.join(HERE, "turso-full.db")
 
 # Roles worth writing down when the page gives us one. Anything else lands as
@@ -212,6 +215,20 @@ def clean_name(name_hint: str, email: str) -> str | None:
     if not all(w[0].isupper() and w.replace("-", "").replace("'", "").isalpha() for w in words):
         return None
     if any(w.lower() in NOT_A_PERSON for w in words):
+        return None
+
+    # Everything above filters by exclusion, and three rounds of that on real
+    # sites showed it does not converge -- "Sign In", "Privacy Terms" and
+    # "Learn More" all cleared the list above and were written as people.
+    #
+    # So the address gets a vote. A personal mailbox carries some of its
+    # owner's name; a navigation label sitting beside info@ shares nothing with
+    # it. is_label runs first because a department mailbox is named after its
+    # department, so "Contact Us" corroborates contact@ perfectly and only
+    # vocabulary can reject it.
+    if is_label(hint):
+        return None
+    if not corroborates(hint, email):
         return None
     return hint
 
