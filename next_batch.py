@@ -93,6 +93,91 @@ TIER_LABEL = {
 }
 
 
+def contacted_in_db(db_path: str) -> set:
+    """Addresses the send_queue already marked SENT/DONE, lowercased.
+
+    sent_log.json is not the whole history. An address can be recorded as sent
+    in the database without ever reaching that file -- a run that crashed after
+    the queue update, or a send made before the log existed. send_emails.py has
+    always excluded both; this preview excluded only the log, and so listed
+    people who would never actually be mailed.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT email FROM contacts WHERE id IN "
+                "(SELECT contact_id FROM send_queue WHERE status IN ('SENT', 'DONE'))"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {r[0].lower() for r in rows if r[0]}
+    except Exception as e:
+        print(f"  Warning: could not read send_queue history: {e}")
+        return set()
+
+
+def evidence_tier(provenance: str | None, probed_at) -> int:
+    """How much the address is trusted not to bounce. Lower is better.
+
+    email_verified alone is not evidence: 730 rows carry it from probes run
+    before the IPv4 fix and before catch-all detection worked on Google-hosted
+    domains. Only probe_checked_at means a probe ran under the current code.
+    Anything else falls back to how the address was found, which for
+    `published` does not depend on probing at all.
+    """
+    prov = provenance or ""
+    fresh = bool(probed_at)
+    if prov == "published" and fresh:
+        return 1
+    if fresh and prov == "verified_guess":
+        return 2
+    if prov in ("published", "researched"):
+        return 3
+    return 4
+
+
+def looks_like_startup(domain, batch, source, priority) -> bool:
+    """Small and recently funded, decided on provenance rather than guesswork.
+
+    A YC batch string or a specific VC's portfolio crawl means someone funded
+    it recently and it is small. Everything else is unranked rather than
+    assumed large -- absence of a batch is not evidence of size.
+    """
+    return (
+        (domain or "").lower() not in NOT_STARTUPS
+        and (priority or 0) >= 0
+        and (bool((batch or "").strip()) or (source or "") in STARTUP_SOURCES)
+    )
+
+
+def rank_key(*, email, name, provenance, probed_at, domain, batch, source,
+             priority, open_roles, confidence) -> tuple:
+    """The sort key for a send batch, best first.
+
+    Mailbox quality is the primary key, ahead of bounce tier. Everything
+    reaching here is already above the send gate, so the question is no longer
+    "will this bounce" but "will anyone read it" -- and a named founder that
+    was probed beats support@ that was probed *and* published. Sorting by tier
+    first put support@veryfi.com at #1 over a founder inbox; sorting by raw
+    confidence, which is what send_emails.py did, put presales@, hr@ and
+    customer-support@ in the top 30 and no named person at all.
+    """
+    return (
+        mailbox_quality(email, name),
+        evidence_tier(provenance, probed_at),
+        not looks_like_startup(domain, batch, source, priority),
+        -(open_roles or 0),
+        -(confidence or 0),
+        # Deterministic tail. Without it the ordering depends on which query the
+        # rows arrived from -- Python's sort is stable, so ties keep their input
+        # order, and next_batch and send_emails read the pool with two different
+        # statements. They agreed on 27 of 30 before this line existed, which is
+        # the worst possible outcome: close enough to look correct.
+        (email or "").lower(),
+    )
+
+
 def mailbox_quality(email: str, name: str | None) -> int:
     """How likely this mailbox is read by someone who can act on the note.
 
@@ -143,11 +228,14 @@ def mailbox_quality(email: str, name: str | None) -> int:
     return 9
 
 
-def build(con, limit: int, tier_filter: str | None, include_sent: bool):
+def build(con, limit: int, tier_filter: str | None, include_sent: bool,
+          db_path: str = DB):
     sent = set()
     p = os.path.join(HERE, "sent_log.json")
     if os.path.exists(p):
         sent = {e.lower() for e in json.load(open(p)).get("sent", [])}
+    # Same two sources send_emails.py excludes, in the same order.
+    sent |= contacted_in_db(db_path)
 
     rows = con.execute("""
         WITH ranked AS (
@@ -174,29 +262,12 @@ def build(con, limit: int, tier_filter: str | None, include_sent: bool):
             continue
 
         prov = r["prov"] or ""
-        # email_verified alone is not evidence: 730 rows carry it from probes
-        # run before the IPv4 fix and before catch-all detection worked on
-        # Google-hosted domains. Only probe_checked_at means a probe ran under
-        # the current code. Anything else falls back to how the address was
-        # found, which for `published` does not depend on probing at all.
-        fresh = bool(r["probed_at"])
-        if prov == "published" and fresh:
-            tier = 1
-        elif fresh and prov == "verified_guess":
-            tier = 2
-        elif prov in ("published", "researched"):
-            tier = 3
-        else:
-            tier = 4
+        tier = evidence_tier(prov, r["probed_at"])
         if tier_filter and TIER_LABEL[tier] != tier_filter:
             continue
 
         domain = (r["domain"] or "").lower()
-        is_startup = (
-            domain not in NOT_STARTUPS
-            and r["priority"] >= 0
-            and (bool((r["batch"] or "").strip()) or (r["co_source"] or "") in STARTUP_SOURCES)
-        )
+        is_startup = looks_like_startup(domain, r["batch"], r["co_source"], r["priority"])
         out.append({
             "id": r["id"], "email": addr, "name": r["name"] or "",
             "role": r["role"] or "", "company": r["company"] or domain,
@@ -205,15 +276,20 @@ def build(con, limit: int, tier_filter: str | None, include_sent: bool):
             "startup": is_startup, "open_roles": r["open_roles"],
             "industry": (r["industry"] or "")[:28],
             "mailbox_rank": mailbox_quality(addr, r["name"]),
+            "_rank": rank_key(
+                email=addr, name=r["name"], provenance=prov,
+                probed_at=r["probed_at"], domain=domain, batch=r["batch"],
+                source=r["co_source"], priority=r["priority"],
+                open_roles=r["open_roles"], confidence=r["conf"],
+            ),
         })
 
-    # Mailbox quality is the primary key, ahead of bounce tier. Every tier here
-    # is already above the send gate, so the question is no longer "will this
-    # bounce" but "will anyone read it" -- and a named founder that was probed
-    # beats support@ that was probed *and* published. Sorting by tier first put
-    # support@veryfi.com at #1 over a founder inbox.
-    out.sort(key=lambda d: (d["mailbox_rank"], d["tier"], not d["startup"],
-                            -d["open_roles"], -d["conf"]))
+    # One definition of "best", in rank_key, used here and by send_emails.py.
+    # This function used to re-state the ordering as a lambda, which is exactly
+    # how a preview drifts away from the thing it previews.
+    out.sort(key=lambda d: d["_rank"])
+    for d in out:
+        del d["_rank"]          # not a column anyone wants in the CSV
     return out[:limit], len(out)
 
 

@@ -237,6 +237,10 @@ def install_outreach_sends():
 #  best-evidenced one, and the runner-up stays in the database untouched for a
 #  later cycle rather than being deleted.
 # ─────────────────────────────────────────────
+# The batch ranking lives in next_batch.py so the preview and the send
+# cannot disagree about what "the best 30" means.
+from next_batch import contacted_in_db, rank_key  # noqa: E402
+
 CONTACT_QUERY = """
     WITH ranked AS (
         SELECT
@@ -247,12 +251,16 @@ CONTACT_QUERY = """
             ct.email_confidence AS email_confidence,
             ct.email_provenance AS email_provenance,
             ct.priority  AS priority,
+            ct.probe_checked_at AS probed_at,
             co.id        AS company_id,
             co.name      AS company_name,
             co.domain    AS company_domain,
             co.industry  AS company_industry,
             co.sector    AS company_sector,
             co.funding_stage AS funding_stage,
+            co.batch     AS batch,
+            co.source    AS co_source,
+            COALESCE(co.open_roles, 0) AS open_roles,
             ROW_NUMBER() OVER (
                 PARTITION BY ct.company_id
                 ORDER BY ct.email_confidence DESC,
@@ -736,29 +744,14 @@ def build_email(cfg: dict, contact: dict, subject: str, body: str) -> MIMEMultip
     return msg
 
 
-def contacted_in_db(db_path: str) -> set:
-    """Addresses the send_queue already marked SENT/DONE, lowercased.
-
-    This used to be `remove_contacted_from_db`, which DELETEd the matching rows
-    from `contacts` outright. Two things were wrong with that. It matched on
-    email rather than id, so one address shared by two company_ids took both
-    rows down with it. And it was an unrecoverable delete of the only structured
-    record of a contact -- leaving sent_log.json, an untracked file, as the sole
-    history. Excluding a contact from today's queue does not require destroying
-    it, so this returns a set to filter with and writes nothing."""
-    try:
-        conn = sqlite3.connect(db_path)
-        try:
-            rows = conn.execute(
-                "SELECT DISTINCT email FROM contacts WHERE id IN "
-                "(SELECT contact_id FROM send_queue WHERE status IN ('SENT', 'DONE'))"
-            ).fetchall()
-        finally:
-            conn.close()
-        return {r[0].lower() for r in rows if r[0]}
-    except Exception as e:
-        print(f"  Warning: could not read send_queue history: {e}")
-        return set()
+# contacted_in_db now lives in next_batch.py, imported above.
+#
+# It used to be `remove_contacted_from_db`, which DELETEd the matching rows from
+# `contacts` outright. Two things were wrong with that: it matched on email
+# rather than id, so one address shared by two company_ids took both rows down
+# with it; and it was an unrecoverable delete of the only structured record of a
+# contact, leaving sent_log.json, an untracked file, as the sole history.
+# Excluding a contact from today's queue does not require destroying it.
 
 
 def load_contacts_from_csv(csv_path: str) -> list:
@@ -824,6 +817,24 @@ def fetch_contacts(db_path: str, min_confidence: int = None,
                                 "provenance": provenance or ""})
     rows = [dict(row) for row in cur.fetchall()]
     conn.close()
+
+    # The SQL orders by confidence, which is the wrong question at this point.
+    # Every row here already cleared the evidence gate, so what remains to
+    # decide is whether a human reads it -- and next_batch.py already works
+    # that out. Before this, the two disagreed completely: comparing the top 30
+    # of each gave an overlap of zero, with the sender choosing presales@,
+    # hr@, sales@ and customer-support@ while next_batch chose named people.
+    #
+    # Imported rather than reimplemented so `next_batch.py -n 30` is a true
+    # preview of what `send_emails.py --limit 30` will do. If it is not, the
+    # preview is worse than useless.
+    rows.sort(key=lambda r: rank_key(
+        email=r["contact_email"], name=r.get("contact_name"),
+        provenance=r.get("email_provenance"), probed_at=r.get("probed_at"),
+        domain=r.get("company_domain"), batch=r.get("batch"),
+        source=r.get("co_source"), priority=r.get("priority"),
+        open_roles=r.get("open_roles"), confidence=r.get("email_confidence"),
+    ))
     return rows
 
 
