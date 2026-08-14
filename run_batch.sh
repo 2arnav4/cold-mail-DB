@@ -60,8 +60,22 @@ if [ -z "$LIMIT" ]; then
 fi
 
 PACE=()
-[ -n "$PER_HOUR" ] && PACE=(--per-hour "$PER_HOUR")
+# --rate-per-hour, not --per-hour. Getting this wrong once cost a run: argparse
+# rejected the unknown flag, send_emails exited 2 before sending anything, and
+# the stages below carried on printing DONE over the top of the failure.
+[ -n "$PER_HOUR" ] && PACE=(--rate-per-hour "$PER_HOUR")
 $PY -u send_emails.py --only-personalized --limit "$LIMIT" "${PACE[@]}" 2>&1 | tee -a "$LOG"
+
+# tee is the last command in the pipe, so $? is tee's status and always 0.
+# PIPESTATUS[0] is the sender's. Without this the script reports success for a
+# run that sent nothing, which is exactly how the first attempt looked fine.
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
+  say "SEND FAILED (exit $rc)"
+  echo "nothing was sent. the log above has the reason." | tee -a "$LOG"
+  echo "log: $LOG"
+  exit "$rc"
+fi
 
 say "SYNC TRACKER"
 $PY -u sender/bounce_scan.py 2>&1 | grep -E "Tracker synced|Detected" | tee -a "$LOG"
