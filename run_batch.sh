@@ -29,6 +29,14 @@ PER_HOUR="${2:-}"
 DRAFTS="${DRAFTS:-drafts-2026-08-15.json}"
 PY=./venv/bin/python
 
+# Must match the gate the drafts were written under. daily_drafts.py --early
+# runs at 70 to reach researched founder addresses; sending at the default 75
+# would drop every one of them and the batch would look like it silently did
+# nothing. Empty means the sender's own default applies.
+MIN_CONF="${MIN_CONF:-}"
+CONF_FLAG=""
+[ -n "$MIN_CONF" ] && CONF_FLAG="--min-confidence $MIN_CONF"
+
 mkdir -p logs
 LOG="logs/batch-$(date +%Y%m%d-%H%M).log"
 
@@ -53,7 +61,7 @@ $PY -m sender.send_drafts --drafts "$DRAFTS" --load 2>&1 | tee -a "$LOG"
 say "SEND"
 if [ -z "$LIMIT" ]; then
   echo "(no limit given, dry run: nothing will be sent)" | tee -a "$LOG"
-  $PY send_emails.py --dry-run --only-personalized --limit 15 2>&1 | tee -a "$LOG"
+  $PY send_emails.py --dry-run --only-personalized --limit 15 $CONF_FLAG 2>&1 | tee -a "$LOG"
   say "DONE (dry run)"
   echo "to send for real:  ./run_batch.sh 15" | tee -a "$LOG"
   exit 0
@@ -67,9 +75,9 @@ fi
 # The flag is --rate-per-hour, not --per-hour: argparse rejects the latter and
 # send_emails exits 2 before sending anything.
 if [ -n "$PER_HOUR" ]; then
-  $PY -u send_emails.py --only-personalized --limit "$LIMIT" --rate-per-hour "$PER_HOUR" 2>&1 | tee -a "$LOG"
+  $PY -u send_emails.py --only-personalized --limit "$LIMIT" --rate-per-hour "$PER_HOUR" $CONF_FLAG 2>&1 | tee -a "$LOG"
 else
-  $PY -u send_emails.py --only-personalized --limit "$LIMIT" 2>&1 | tee -a "$LOG"
+  $PY -u send_emails.py --only-personalized --limit "$LIMIT" $CONF_FLAG 2>&1 | tee -a "$LOG"
 fi
 
 # tee is the last command in the pipe, so $? is tee's status and always 0.

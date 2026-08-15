@@ -53,6 +53,58 @@ from pipeline.enrich_descriptions import fetch_blurb      # noqa: E402
 # the all-time rate to 25.8%. Every category below has bounced zero times.
 SAFE_PROVENANCE = {"verified_guess", "published", "pending_recheck", "researched"}
 
+# --early: what counts as an early-stage company, in the order the signals are
+# actually populated. funding_stage is empty for 779 of the 876 reachable
+# contacts, so it cannot be the primary test; an accelerator batch year is the
+# reliable one, and a 2025 or 2026 batch means a team small enough that the
+# founder still reads their own mail.
+EARLY_BATCH_FROM = 2025
+EARLY_STAGES = {"pre-seed", "seed"}
+EARLY_SOURCES = ("antler", "india-quotient")
+
+
+def is_early(contact: dict) -> bool:
+    year = re.search(r"(20\d\d)", contact.get("batch") or "")
+    if year and int(year.group(1)) >= EARLY_BATCH_FROM:
+        return True
+    if (contact.get("funding_stage") or "").lower() in EARLY_STAGES:
+        return True
+    source = (contact.get("co_source") or "").lower()
+    return any(s in source for s in EARLY_SOURCES)
+
+
+def brand_mismatch(contact: dict) -> bool:
+    """True when the address belongs to a different company than the draft.
+
+    Every draft is written about one specific company, so a contact filed
+    under the wrong one produces a confident email about the wrong product --
+    gabriel@primer.io, a payments company, sits under Standout, an agentic
+    hiring marketplace.
+
+    Only the brand label is compared, never the full domain: 84 of the 4562
+    reachable contacts differ from their company domain and nearly all are the
+    same brand on another TLD (vegrow.in vs vegrow.com, axle.energy vs
+    axle.insure), which is correct and must not be dropped.
+    """
+    company_domain = (contact.get("company_domain") or "").lower().strip()
+    if not company_domain or "@" not in contact["contact_email"]:
+        return False
+    return (contact["contact_email"].split("@")[1].lower().split(".")[0]
+            != company_domain.split(".")[0])
+
+
+def early_rank(contact: dict):
+    """Youngest batch first, then the sender's own order.
+
+    Reply rate is the whole point of the filter, and it tracks team size: a
+    Summer 2026 company is a handful of people, a Spring 2025 one has already
+    hired. Companies with no batch at all sort last.
+    """
+    year = re.search(r"(20\d\d)", contact.get("batch") or "")
+    return (-int(year.group(1)) if year else 0,
+            0 if (contact.get("contact_name") or "").strip() else 1)
+
+
 GROQ_MODEL = "llama-3.3-70b-versatile"
 
 PORTFOLIO = "https://arnav24.tech"
@@ -148,22 +200,33 @@ def _client():
     return Groq(api_key=key)
 
 
-def select(count: int) -> list:
+def select(count: int, early: bool = False, min_confidence: int = None) -> list:
     """The next `count` contacts, in the sender's own ranking order.
 
     fetch_contacts() is the single source of truth for who is reachable. Doing
     the selection with a hand-written query here is how the last batch ended up
     with 14 drafts addressed to people the sender could never surface.
+
+    `min_confidence` must match what the eventual send uses, for the same
+    reason: drafting at 70 and sending at the default 75 writes emails to
+    addresses the sender will never surface, and they sit unsent forever.
     """
     excluded = se.sent_index(se.load_log(se.CONFIG["log_path"]))
     excluded |= se.contacted_in_db(se.CONFIG["db_path"])
+    rows = se.fetch_contacts(se.CONFIG["db_path"], min_confidence=min_confidence)
+    if early:
+        rows = sorted((c for c in rows if is_early(c)), key=early_rank)
     out = []
-    for c in se.fetch_contacts(se.CONFIG["db_path"]):
+    for c in rows:
         if len(out) >= count:
             break
         if c["email_provenance"] not in SAFE_PROVENANCE:
             continue
         if se.already_sent(excluded, c["contact_email"]):
+            continue
+        if brand_mismatch(c):
+            print(f"  skipped (wrong company): {c['contact_email']} filed under "
+                  f"{c['company_name']} / {c['company_domain']}")
             continue
         out.append(c)
     return out
@@ -261,12 +324,24 @@ def main():
     ap.add_argument("--count", type=int, default=30)
     ap.add_argument("--out", default=None, help="output path (default drafts-<today>.json)")
     ap.add_argument("--dry-run", action="store_true", help="print only, write nothing")
+    ap.add_argument("--early", action="store_true",
+                    help="only early-stage companies: a 2025+ accelerator batch, "
+                         "a seed/pre-seed stage, or a pre-seed accelerator. "
+                         "Youngest batch first.")
+    ap.add_argument("--min-confidence", type=int, default=None, metavar="N",
+                    help="confidence gate for this run. Pass the SAME value to "
+                         "send_emails.py, or the drafts are unsendable.")
     args = ap.parse_args()
 
-    targets = select(args.count)
+    targets = select(args.count, early=args.early,
+                     min_confidence=args.min_confidence)
     if not targets:
         sys.exit("Nothing to draft: no unsent contacts in the safe provenance set.")
     print(f"Drafting {len(targets)} emails (asked for {args.count})")
+    if args.early:
+        named = sum(1 for c in targets if (c.get("contact_name") or "").strip())
+        print(f"  early-stage only: {named} to a named founder, "
+              f"{len(targets) - named} to a shared founder inbox")
 
     client = _client()
     con = sqlite3.connect(se.CONFIG["db_path"], timeout=60)
@@ -312,7 +387,9 @@ def main():
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(drafts, fh, indent=2, ensure_ascii=False)
     print(f"\n  -> {out}")
-    print(f"  send with:  DRAFTS={os.path.basename(out)} ./run_batch.sh {len(drafts)} 7")
+    conf = f"MIN_CONF={args.min_confidence} " if args.min_confidence is not None else ""
+    print(f"  send with:  {conf}DRAFTS={os.path.basename(out)} "
+          f"./run_batch.sh {len(drafts)} 7")
 
 
 if __name__ == "__main__":

@@ -263,7 +263,26 @@ CONTACT_QUERY = """
             COALESCE(co.open_roles, 0) AS open_roles,
             ROW_NUMBER() OVER (
                 PARTITION BY ct.company_id
-                ORDER BY ct.email_confidence DESC,
+                -- A contact with a real name beats a nameless one for the
+                -- company's single slot, ahead of confidence. Confidence
+                -- alone hands the slot to the shared inbox every time: a
+                -- published founders@ scores 100 while the founder behind it
+                -- is a researched guess at 70, so 55 early-stage companies
+                -- resolved to an address that can only open "Hi there,".
+                --
+                -- Gated on the safe provenances and >= 60 so this promotes a
+                -- researched person, never a bare pattern guess -- those sit
+                -- at confidence 15 and would take the slot, then get dropped
+                -- by the drafter, losing the company entirely.
+                ORDER BY CASE
+                             WHEN COALESCE(TRIM(ct.name), '') != ''
+                              AND COALESCE(ct.email_confidence, 0) >= 60
+                              AND ct.email_provenance IN (
+                                  'verified_guess', 'published',
+                                  'pending_recheck', 'researched')
+                             THEN 0 ELSE 1
+                         END,
+                         ct.email_confidence DESC,
                          ct.priority DESC,
                          ct.id ASC
             ) AS rn
@@ -285,12 +304,23 @@ CONTACT_QUERY = """
             -- nobody because help@example.com, assist@example.in and the like
             -- were holding their company's single slot. Cold mail to a support
             -- queue is also worth roughly nothing.
+            --
+            -- hiring/join/talent/apply/recruiting are the same category as
+            -- careers@ and jobs@ under different names, and they are where
+            -- an intro competes with the resume pile instead of being read.
+            -- grievance/inquiries/pr/enterprise mirror press@ and sales@.
+            --
+            -- founders@, hi@, hey@ and work@ are deliberately NOT here: at a
+            -- five-person company that inbox is the founder's, and it is the
+            -- best address available for 193 of them.
             AND lower(substr(ct.email, 1, instr(ct.email, '@') - 1)) NOT IN (
                 'help', 'support', 'info', 'contact', 'careers', 'jobs', 'hr',
                 'hello', 'admin', 'sales', 'assist', 'partner', 'team',
                 'welisten', 'joinus', 'escalationdesk', 'ta-team', 'enquiry',
                 'enquiries', 'office', 'mail', 'service', 'care', 'feedback',
-                'press', 'media', 'marketing', 'no-reply', 'noreply'
+                'press', 'media', 'marketing', 'no-reply', 'noreply',
+                'hiring', 'join', 'talent', 'apply', 'recruiting',
+                'grievance', 'inquiries', 'pr', 'enterprise'
             )
     )
     SELECT * FROM ranked
@@ -1304,6 +1334,16 @@ def main():
         help="Override cfg['daily_limit'] for this run only (lets today's send count exceed the normal cap)",
     )
     parser.add_argument(
+        "--min-confidence",
+        type=int,
+        metavar="N",
+        help="Override cfg['min_confidence'] for this run only. The default 75 "
+             "excludes researched founder addresses, which sit at 70: 34 such "
+             "sends have bounced 0 times, against 35.9%% for the `list` tier. "
+             "Lower it per run rather than in CONFIG so normal batches are "
+             "unaffected.",
+    )
+    parser.add_argument(
         "--show-queue",
         action="store_true",
         help="Show the next contacts that would be emailed and exit",
@@ -1387,6 +1427,9 @@ def main():
     if args.daily_limit:
         cfg["daily_limit"] = args.daily_limit
 
+    if args.min_confidence is not None:
+        cfg["min_confidence"] = args.min_confidence
+
     # Handle manual bounce check flag
     if args.check_bounces:
         check_and_sync_bounces(cfg)
@@ -1465,8 +1508,14 @@ def main():
         print(f"  Source              : {args.csv}")
         print(f"  Total contacts in CSV: {len(all_contacts)}")
     else:
-        all_contacts = fetch_contacts(cfg["db_path"])
+        # cfg, not CONFIG: fetch_contacts defaults to the module-level CONFIG,
+        # so --min-confidence would be accepted and then silently ignored.
+        all_contacts = fetch_contacts(cfg["db_path"],
+                                      min_confidence=cfg["min_confidence"])
         print(f"  Total contacts in DB: {len(all_contacts)}")
+        if cfg["min_confidence"] != CONFIG["min_confidence"]:
+            print(f"  Confidence gate     : {cfg['min_confidence']} "
+                  f"(default {CONFIG['min_confidence']}, this run only)")
 
     # Filter out already-sent
     queue = [c for c in all_contacts if not already_sent(excluded, c["contact_email"])]
