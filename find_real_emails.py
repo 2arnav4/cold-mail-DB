@@ -83,8 +83,8 @@ def ensure_columns(con):
 
 # Company sites carry addresses that are not the company's: customer logos,
 # testimonials, integration docs, and copy-paste placeholder text. Scraping
-# orangeslice.ai yielded patrick@stripe.com, dylan@figma.com and
-# olivier@datadoghq.com -- real people at other companies. Mailing them a pitch
+# orangeslice.ai yielded someone@stripe.com, someone@figma.com and
+# someone@datadoghq.com -- real people at other companies. Mailing them a pitch
 # about Orange Slice would be considerably worse than a bounce.
 PLACEHOLDER_DOMAINS = {
     "example.com", "example.org", "example.net", "test.com", "email.com",
@@ -131,7 +131,7 @@ EMAIL_OK = re.compile(r"^[\w.+\-]+@[\w\-]+(\.[\w\-]+)*\.[a-zA-Z]{2,}$")
 
 
 def normalise(email: str) -> str:
-    """Trailing dots come straight off the page ('founders@convexia.bio.') and
+    """Trailing dots come straight off the page ('founders@example.bio.') and
     a stored address with one will never match anything. The mailto: prefix
     survives some malformed href attributes, and code samples on docs pages
     contribute things like git@github.com and password@prod.db."""

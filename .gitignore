@@ -64,3 +64,14 @@ reports/attribution-cleared-*.csv
 
 # Written drafts: real founders' addresses plus unsent copy.
 drafts-*.json
+
+# nohup output from unattended sends. Regenerable, and carries recipient
+# addresses in the send log lines.
+nohup*.out
+
+# Timestamped local backups of the drafts file.
+*.bak-*
+*.EMPTY-*
+
+# Claude Code project settings
+.claude/

@@ -275,6 +275,23 @@ CONTACT_QUERY = """
             AND ct.email != ''
             AND COALESCE(ct.email_confidence, 0) >= :min_confidence
             AND (:provenance = '' OR ct.email_provenance = :provenance)
+            -- Role inboxes are excluded outright, not just deprioritised.
+            --
+            -- rn = 1 keeps one contact per company ordered by confidence, and a
+            -- scraped support@ address is published on the site so it scores
+            -- 100, while a researched founder address is a verified_guess and
+            -- scores lower. The role address therefore WINS its company and the
+            -- founder becomes unreachable: 14 of 30 written drafts resolved to
+            -- nobody because help@example.com, assist@example.in and the like
+            -- were holding their company's single slot. Cold mail to a support
+            -- queue is also worth roughly nothing.
+            AND lower(substr(ct.email, 1, instr(ct.email, '@') - 1)) NOT IN (
+                'help', 'support', 'info', 'contact', 'careers', 'jobs', 'hr',
+                'hello', 'admin', 'sales', 'assist', 'partner', 'team',
+                'welisten', 'joinus', 'escalationdesk', 'ta-team', 'enquiry',
+                'enquiries', 'office', 'mail', 'service', 'care', 'feedback',
+                'press', 'media', 'marketing', 'no-reply', 'noreply'
+            )
     )
     SELECT * FROM ranked
     WHERE rn = 1
@@ -1341,7 +1358,7 @@ def main():
     # it already has a good answer for, and right now that live probe often
     # comes back `catchall_inconclusive` or blocked -- so a confirmed contact
     # gets held back on the strength of a worse check than the one already run.
-    # koen@framer.com was skipped exactly this way.
+    # koen@example.com was skipped exactly this way.
     try:
         _con = sqlite3.connect(CONFIG["db_path"], timeout=60)
         pre_verified |= {

@@ -18,9 +18,9 @@ database and became "Hi Contact," in a real cold email.
 Twenty more got through anyway, because the list does not contain "sign",
 "privacy", "learn", "report" or "acquire":
 
-    Sign In          arjun@lexoga.com
-    Privacy Terms    info@atomscale.ai
-    Learn More       partnerships@ziina.com
+    Sign In          arjun@example.com
+    Privacy Terms    info@example.ai
+    Learn More       partnerships@example.com
 
 Filtering by exclusion does not converge. A website produces an unbounded
 supply of two-capitalised-word phrases, and every word added to the list only
@@ -33,7 +33,7 @@ becomes the evidence for the name, and unlike a word list, that is bounded.
 
 One thing corroboration cannot do, so `is_label` still exists: a department
 mailbox is named after its department, so "Contact Us" corroborates
-`contact@fenrock.ai` perfectly. Corroboration proves the address matches the
+`contact@example.ai` perfectly. Corroboration proves the address matches the
 words. Only vocabulary can say the words are not a person.
 """
 import re
@@ -47,8 +47,8 @@ INVISIBLE = dict.fromkeys(
     map(ord, "\u200b\u200c\u200d\u200e\u200f\ufeff\u00ad\u2060"), None)
 
 # Short forms that share no prefix with the name they stand for, so no amount
-# of substring matching finds them. `mike@layuplabs.ai` for Michael Lemm and
-# `nick@superpowered.ai` for Nicholas McCormick are both real personal
+# of substring matching finds them. `mike@example.ai` for Michael Lemm and
+# `nick@example.ai` for Nicholas McCormick are both real personal
 # addresses this rule condemned before the table existed.
 #
 # One direction only, short -> long: the address carries the short form and the
@@ -116,7 +116,7 @@ SPLIT_NAME = re.compile(r"[^a-z]+")
 def deaccent(text: str) -> str:
     """Lowercase, with accented letters reduced to their base letter.
 
-    `jerome@napkin.ai` spelled `jerome` with two accents is Jerome Scholler's
+    `jerome@example.ai` spelled `jerome` with two accents is Jerome Scholler's
     own address, so both sides have to reduce to the same ASCII before they can
     be compared.
 

@@ -9,11 +9,11 @@ was added after 131 rows called "Contact Us" reached the database.
 Twenty more got through anyway, because the list does not contain "sign",
 "privacy", "learn", "report" or "acquire":
 
-    Sign In                  arjun@lexoga.com
-    Privacy Terms            info@atomscale.ai
-    Learn More               partnerships@ziina.com
-    Report Abuse             support@insforge.dev
-    Contact Investor Rel...  ir@hioscar.com
+    Sign In                  arjun@example.com
+    Privacy Terms            info@example.ai
+    Learn More               partnerships@example.com
+    Report Abuse             support@example.dev
+    Contact Investor Rel...  ir@example.com
 
 Filtering by exclusion does not converge. A company website produces an
 unbounded supply of two-capitalised-word phrases, and every word added to the
@@ -28,9 +28,9 @@ word list, that is bounded.
 It also catches something no crawler fix can reach: rows from imported contact
 lists where the name and the address are simply different people.
 
-    Varsha Raghav            tyson@rapidinnovation.dev
-    Zachary Gittelman        jamie@themangohealth.com
-    Mikalai Melchanka        sriram@antwak.com
+    Varsha Raghav            tyson@example.dev
+    Zachary Gittelman        jamie@example.com
+    Mikalai Melchanka        sriram@example.com
 
 Those read as the best rows in the database -- a full name, a real address, a
 curated source -- and they greet a stranger by somebody else's name.
