@@ -42,8 +42,14 @@ def _robots_allows(base_url: str, path: str) -> bool:
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     rp = urllib.robotparser.RobotFileParser()
     try:
-        rp.set_url(robots_url)
-        rp.read()
+        # RobotFileParser.read() calls urlopen() with no timeout, so a host
+        # that accepts the connection but never responds hangs forever.
+        # Fetching with requests (which does respect REQUEST_TIMEOUT) and
+        # feeding the parser the lines directly avoids that.
+        resp = requests.get(robots_url, timeout=REQUEST_TIMEOUT, headers=HEADERS)
+        if resp.status_code >= 400:
+            return True
+        rp.parse(resp.text.splitlines())
     except Exception:
         # No readable robots.txt -> default to allowed for a normal page fetch.
         return True
