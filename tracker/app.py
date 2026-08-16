@@ -313,9 +313,17 @@ def bulk_sync():
     try:
         with closing(get_db()) as conn, conn:
             for s in sends:
+                # A real send is the most authoritative outcome for an address,
+                # so it always wins on conflict -- including over a prior
+                # 'skipped' or 'bounced' row from an earlier attempt. Without
+                # this ON CONFLICT clause (previously INSERT OR IGNORE), an
+                # address held back once as unverifiable could never show as
+                # sent later, even after it was actually mailed successfully.
                 conn.execute(
-                    "INSERT OR IGNORE INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
-                    "VALUES (?, ?, ?, 'sent', '', '', '')",
+                    "INSERT INTO sends (email, company, sent_at, status, bounce_reason, bounce_type, retry_after) "
+                    "VALUES (?, ?, ?, 'sent', '', '', '') "
+                    "ON CONFLICT(email) DO UPDATE SET status='sent', company=excluded.company, "
+                    "sent_at=excluded.sent_at, bounce_reason='', bounce_type='', retry_after=''",
                     (s.get("email", ""), s.get("company", ""), s.get("sent_at", "")),
                 )
             for b in bounces:
