@@ -54,9 +54,18 @@ _load_env()
 
 from email_verify import verify_email  # noqa: E402 (must load after _load_env populates os.environ)
 
+# The mailbox the batch is sent from. Cold outreach moved off the personal
+# gmail.com account on 2026-08-19: a consumer Gmail has no DMARC policy of its
+# own and no Postmaster Tools, so a bad bounce run could not be seen or
+# repaired. arnav24.me carries its own SPF, DKIM and DMARC.
+#
+# SMTP_HOST / IMAP_HOST default to Zoho's India data centre, which is where
+# arnav24.me is hosted. Override in .env when the mailbox moves.
 CONFIG = {
     "your_email": _os.environ.get("GMAIL_ADDRESS", ""),
     "app_password": _os.environ.get("GMAIL_APP_PASSWORD", ""),
+    "smtp_host": _os.environ.get("SMTP_HOST", "smtp.zoho.in"),
+    "imap_host": _os.environ.get("IMAP_HOST", "imap.zoho.in"),
     "your_name": "Arnav Singla",
     "resume_path": "ARNAV-RESUME.pdf",
     "db_path": "turso-full.db",
@@ -908,7 +917,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
     import urllib.request as _urllib
     import json as _json
 
-    print("Checking Gmail for new bounces via IMAP...")
+    print(f"Checking {cfg['imap_host']} for new bounces via IMAP...")
     email_addr = cfg["your_email"]
     app_pwd = cfg["app_password"].replace(" ", "")
     tracker_url = cfg.get("tracker_url", "").rstrip("/")
@@ -927,7 +936,7 @@ def check_and_sync_bounces(cfg: dict) -> list:
     bounced_records = []  # list of {email, reason, bounce_type, retry_after}
 
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        mail = imaplib.IMAP4_SSL(cfg["imap_host"])
         mail.login(email_addr, app_pwd)
         mail.select("INBOX")
 
@@ -1296,7 +1305,7 @@ def send_test_email(cfg: dict, recipient: str):
     print(f"  Resume  : {'attached' if any(p.get_filename() for p in msg.walk()) else 'MISSING'}")
 
     try:
-        conn = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+        conn = smtplib.SMTP_SSL(cfg["smtp_host"], 465, timeout=30)
         conn.login(cfg["your_email"], cfg["app_password"].replace(" ", ""))
         conn.send_message(msg)
         conn.quit()
@@ -1555,7 +1564,7 @@ def main():
     smtp_conn = None
 
     def smtp_connect():
-        conn = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30)
+        conn = smtplib.SMTP_SSL(cfg["smtp_host"], 465, timeout=30)
         conn.login(cfg["your_email"], cfg["app_password"].replace(" ", ""))
         return conn
 
