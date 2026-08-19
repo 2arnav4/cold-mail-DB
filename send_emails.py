@@ -106,7 +106,17 @@ CONFIG = {
     # min_confidence. Set to "published" for a low-bounce batch: those addresses
     # were read off the company's own website, where the list tier is bought
     # data that is now several months stale.
-    "send_provenance": "",
+    #
+    # Pinned to "published" on 2026-08-19. Across 1818 sends the mixed queue
+    # bounced at 28% (513 bounces), and the tiers are not equally to blame:
+    # `list` bounces at ~31% while `published` bounces at ~0%. A 28% bounce
+    # rate is what a purchased list looks like to Gmail, and it is why good
+    # addresses were being filtered alongside the dead ones.
+    #
+    # arnav24.me is a new domain with no reputation to spend, so this stays
+    # pinned until the other tiers have been re-verified. Widening it before
+    # then burns the domain.
+    "send_provenance": "published",
 }
 
 
