@@ -78,3 +78,4 @@ nohup*.out
 
 # Hand-picked send batches: real recipients, same reason as drafts-*.json.
 batch-*.csv
+HANDOFF-*.md
