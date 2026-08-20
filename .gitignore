@@ -75,3 +75,6 @@ nohup*.out
 
 # Claude Code project settings
 .claude/
+
+# Hand-picked send batches: real recipients, same reason as drafts-*.json.
+batch-*.csv
