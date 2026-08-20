@@ -43,6 +43,25 @@ import send_emails as se  # noqa: E402  (loads .env on import)
 PREVIEW_TO = "singlaarnav2405@gmail.com"
 
 
+def reencode(part, text: str) -> None:
+    """Replace a MIME part's body, keeping the headers honest about it.
+
+    `set_payload(text, charset="utf-8")` looks like it does this, but
+    set_charset() only base64-encodes the body when the part has no
+    Content-Transfer-Encoding header yet. MIMEText already set one, so the
+    encode step is skipped: the header keeps saying `base64` while the payload
+    goes back to being raw text.
+
+    Gmail hides the damage -- it notices the body is not valid base64 and falls
+    back to rendering it raw. Zoho believes the header, decodes plain prose as
+    base64, and shows a wall of mojibake it then offers to translate from
+    Icelandic. Deleting the header first lets set_payload re-encode properly,
+    so both clients see the same thing.
+    """
+    del part["Content-Transfer-Encoding"]
+    part.set_payload(text, charset="utf-8")
+
+
 def contacts_from_csv(path: str) -> list:
     return se.load_contacts_from_csv(path)
 
@@ -140,13 +159,13 @@ def main() -> int:
             for part in msg.walk():
                 if part.get_content_type() == "text/plain":
                     payload = part.get_payload(decode=True).decode("utf-8", "replace")
-                    part.set_payload(payload + marker, charset="utf-8")
+                    reencode(part, payload + marker)
                 elif part.get_content_type() == "text/html":
                     payload = part.get_payload(decode=True).decode("utf-8", "replace")
-                    part.set_payload(
-                        payload.replace("</body>", f"<hr><p>{marker.strip()}</p></body>")
-                        if "</body>" in payload else payload + f"<hr><p>{marker.strip()}</p>",
-                        charset="utf-8")
+                    reencode(part, payload.replace(
+                        "</body>", f"<hr><p>{marker.strip()}</p></body>")
+                        if "</body>" in payload
+                        else payload + f"<hr><p>{marker.strip()}</p>")
 
         # The preview goes to the operator, never to the contact. Rewriting the
         # header without rebuilding the message keeps subject, body, links and

@@ -656,6 +656,31 @@ def render(template: str, contact: dict) -> str:
 import re
 
 
+def split_trailing_punctuation(url: str):
+    """Split a matched URL from the sentence punctuation stuck to its end.
+
+    "I built Lucent (https://lucent.vercel.app/), a dashboard" is ordinary
+    prose, but a URL pattern that stops only at whitespace swallows the "),"
+    and the link 404s. Trailing . , ; : ! ? ' " are never part of a URL in a
+    sentence, so they come off unconditionally.
+
+    ")" is the hard case: it is legal inside a URL (Wikipedia disambiguation
+    pages end in one), so it only comes off when it has no "(" to match inside
+    the URL itself. That keeps ".../Mercury_(planet)" intact while still
+    releasing the paren that closed the sentence.
+    """
+    tail = ""
+    while url:
+        last = url[-1]
+        if last in ".,;:!?'\"":
+            url, tail = url[:-1], last + tail
+        elif last == ")" and url.count("(") < url.count(")"):
+            url, tail = url[:-1], last + tail
+        else:
+            break
+    return url, tail
+
+
 def text_to_html(text: str, pixel_tag: str = "") -> str:
     """Convert plain text email body to clean HTML with clickable links."""
     import html as html_lib
@@ -668,10 +693,17 @@ def text_to_html(text: str, pixel_tag: str = "") -> str:
         r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', escaped
     )
 
-    # 2. Auto-link remaining raw https:// and http:// URLs (ignoring already linked ones)
-    escaped = re.sub(
-        r'(?<!href=")(?<!">)(https?://[^\s<>"]+)', r'<a href="\1">\1</a>', escaped
-    )
+    # 2. Auto-link remaining raw https:// and http:// URLs (ignoring already
+    #    linked ones). The match runs to the next whitespace, so any sentence
+    #    punctuation riding on the end is split back out and left as text --
+    #    inside the anchor it becomes part of the href and the link dies.
+    def _autolink(m):
+        url, tail = split_trailing_punctuation(m.group(1))
+        if not url:
+            return m.group(0)
+        return f'<a href="{url}">{url}</a>{tail}'
+
+    escaped = re.sub(r'(?<!href=")(?<!">)(https?://[^\s<>"]+)', _autolink, escaped)
 
     # Convert newlines to <br> and wrap in clean HTML
     body_html = escaped.replace("\n", "<br>\n")
@@ -731,12 +763,14 @@ def wrap_links(text, email, company, tracker_url, secret=""):
     company = (company or "").replace("|", "/")
 
     def replace_url(match):
-        url = match.group(1)
+        url, tail = split_trailing_punctuation(match.group(1))
+        if not url:
+            return match.group(0)
         if tracker_clean in url:
-            return url
+            return url + tail
         payload = f"{email}|{company}|{url}"
         encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-        return f"{tracker_clean}/c/{encoded}.{sign_payload(encoded, secret)}"
+        return f"{tracker_clean}/c/{encoded}.{sign_payload(encoded, secret)}{tail}"
 
     url_pattern = r"(https?://[a-zA-Z0-9.\-_~!$&\'()*+,;=:@/%?#]+)"
     return re.sub(url_pattern, replace_url, text)
