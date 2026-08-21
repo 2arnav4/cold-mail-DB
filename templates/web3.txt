@@ -2,16 +2,19 @@ Subject: Solana, Rust, and a finance dashboard
 
 Hi {{first_name}},
 
-Onchain work has a constraint I like. You cannot patch your way out of a bad deploy, so the thinking has to happen first.
+Onchain work has a constraint I like: you cannot patch your way out of a bad deploy, so the thinking has to happen first. I write Rust for Solana, and deciding what to show when your sources conflict is a smaller version of a problem this space has constantly.
 
-I'm a third-year CSE student in Delhi. I write Rust for Solana, and I built Lucent, a dashboard tracking 200+ stocks and crypto assets live across three APIs that regularly disagree with each other. Deciding what to show when your sources conflict is a smaller version of a problem this space has constantly.
+I'm a third-year CSE student in Delhi, graduating 2028. The three closest things I've built:
 
-Also React/Next.js and TypeScript, Node/Express, Postgres, and Go.
+• Lucent, 200+ assets priced live: one shared poll across three market APIs instead of one per widget, which stays inside free-tier limits and still shows a single reconciled price. https://lucent-fintech-psi.vercel.app/
+• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over one Postgres schema, JWT and per-route rate limits, so a retried write never duplicates a task. https://pulse-nu-liard.vercel.app/
+• Student Helper, 150+ students: notes sharing, a swap marketplace and role-based access, so every upload stays attributable and only its owner can remove it. https://student-helper-yaye.vercel.app/
+
+Would like to be considered for an internship at {{company}}.
 
 Resources:
-• Lucent: https://lucent-fintech-psi.vercel.app/
-• GitHub: https://github.com/2arnav4
-• Portfolio: https://arnav24.tech
+• Portfolio, all projects and code: https://arnav24.tech
+• Resume: https://www.arnav24.tech/resume.pdf
 
 Resume attached.
 

@@ -110,31 +110,42 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 PORTFOLIO = "https://arnav24.tech"
 RESUME = "https://www.arnav24.tech/resume.pdf"
 
-# Two project links per email, picked by sector, so the projects shown are the
-# ones that plausibly relate to what the company builds.
+# One line per project: the number first, then what was actually done to get
+# it, then the link. A founder scans the numbers in three seconds and opens a
+# project only if one of them is interesting. Naming a count of endpoints on
+# its own ("14 endpoints") says nothing, so each line says what the work buys.
 PROJECTS = {
-    "pulse": "Pulse (https://pulse-nu-liard.vercel.app/), a Node/Express backend with "
-             "Postgres, JWT auth and rate limiting across 14 endpoints",
-    "lucent": "Lucent (https://lucent-fintech-psi.vercel.app/), a finance dashboard "
-              "pulling live data from three market APIs and handling their rate limits "
-              "and inconsistent payloads",
-    "helper": "Student Helper (https://student-helper-yaye.vercel.app/), an academic "
-              "platform serving 150+ students with notes sharing, a swap marketplace "
-              "and role-based access",
+    "pulse": "• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over "
+             "one Postgres schema, JWT and per-route rate limits, so a retried write never "
+             "duplicates a task. https://pulse-nu-liard.vercel.app/",
+    "lucent": "• Lucent, 200+ assets priced live: one shared poll across three market APIs "
+              "instead of one per widget, which stays inside free-tier limits and still "
+              "shows a single reconciled price. https://lucent-fintech-psi.vercel.app/",
+    "helper": "• Student Helper, 150+ students: notes sharing, a swap marketplace and "
+              "role-based access, so every upload stays attributable and only its owner "
+              "can remove it. https://student-helper-yaye.vercel.app/",
 }
+# All three ship in every email; the order is what changes, most relevant to
+# the company's sector first, because only the first bullet is read closely.
 SECTOR_PROJECTS = {
-    "fintech":    ("lucent", "pulse"),
-    "b2b-saas":   ("pulse", "lucent"),
-    "devtools":   ("pulse", "lucent"),
-    "consumer":   ("helper", "pulse"),
-    "healthtech": ("pulse", "helper"),
-    "web3":       ("lucent", "pulse"),
+    "fintech":    ("lucent", "pulse", "helper"),
+    "b2b-saas":   ("pulse", "lucent", "helper"),
+    "devtools":   ("pulse", "lucent", "helper"),
+    "consumer":   ("helper", "pulse", "lucent"),
+    "healthtech": ("pulse", "helper", "lucent"),
+    "web3":       ("lucent", "pulse", "helper"),
 }
-DEFAULT_PROJECTS = ("pulse", "helper")
+DEFAULT_PROJECTS = ("pulse", "helper", "lucent")
 
-INTRO = "I'm a third-year CSE student in Delhi, graduating 2028."
-CLOSER = "Would like to be considered for a backend internship."
-RESOURCES = (f"Resources:\n• Portfolio: {PORTFOLIO}\n• Resume: {RESUME}\n\nArnav")
+INTRO = ("I'm a third-year CSE student in Delhi, graduating 2028. The three closest "
+         "things I've built:")
+# Never name a track (backend/frontend/etc): the email should not presume
+# which role is open. Generic ask, company named.
+CLOSER = "Would like to be considered for an internship at {company}."
+# No GitHub link. The portfolio already indexes every project and its source,
+# and a second code link only splits the click.
+RESOURCES = (f"Resources:\n• Portfolio, all projects and code: {PORTFOLIO}"
+             f"\n• Resume: {RESUME}\n\nArnav")
 
 PROMPT = """You are writing the opening of a cold email from an Indian CS undergraduate \
 asking for a backend engineering internship. The recipient is the founder of this company.
@@ -148,8 +159,9 @@ Write TWO things:
 engineering problem this company has. It must NOT contain the company name. It must not \
 look like a mail merge. Examples of the right register: "on ranking rather than retrieval", \
 "about fee schedules that never match", "and inventory that moves in minutes".
-2. "opener" -- two or three sentences naming a real ENGINEERING tension implied by what \
-they do. Show you understand the hard part of their problem.
+2. "opener" -- EXACTLY two sentences naming a real ENGINEERING tension implied by what \
+they do. Show you understand the hard part of their problem. Two sentences, no more: the \
+projects underneath carry the rest of the email.
 
 The single most important rule: DO NOT DESCRIBE WHAT THE COMPANY DOES. They know. \
 Describing their product back at them is the mark of a mass email and gets deleted. \
@@ -255,19 +267,21 @@ def research(contact: dict, con, dry: bool) -> str:
 
 def compose(contact: dict, subject: str, opener: str) -> str:
     sector = (contact.get("company_sector") or "").lower()
-    a, b = SECTOR_PROJECTS.get(sector, DEFAULT_PROJECTS)
+    keys = SECTOR_PROJECTS.get(sector, DEFAULT_PROJECTS)
     first = (contact.get("contact_name") or "there").split()[0]
-    return (f"Hi {first},\n\n{opener}\n\n{INTRO} I built {PROJECTS[a]}. "
-            f"Also {PROJECTS[b]}.\n\n{CLOSER}\n\n{RESOURCES}")
+    bullets = "\n".join(PROJECTS[k] for k in keys)
+    return (f"Hi {first},\n\n{opener}\n\n{INTRO}\n\n{bullets}\n\n"
+            f"{CLOSER.format(company=contact.get('company_name') or 'your team')}"
+            f"\n\n{RESOURCES}")
 
 
 def validate(subject: str, body: str, seen_subjects: set) -> str | None:
     """Return an error string, or None when the draft is shippable."""
     links = re.findall(r'https?://[^\s<>")]+', body)
-    if len(links) != 4:
-        return f"{len(links)} links, want exactly 4"
-    if sum(1 for u in links if "arnav24.tech" not in u) != 2:
-        return "project links != 2"
+    if len(links) != 5:
+        return f"{len(links)} links, want exactly 5"
+    if sum(1 for u in links if "arnav24.tech" not in u) != 3:
+        return "project links != 3"
     if "github.com" in body or "linkedin" in body.lower():
         return "contains github/linkedin"
     if "—" in body or "—" in subject:

@@ -2,18 +2,19 @@ Subject: Built an SMTP verifier in Go, want to build more
 
 Hi {{first_name}},
 
-Developer tools are one of the few categories where the users read your source. That raises the bar in a way I want to work against.
+Developer tools are one of the few categories where users read your source, which raises the bar in a way I want to work against. I also wrote an SMTP verifier in Go with no third-party dependencies, where the hard part was telling a dead mailbox apart from a server refusing my IP.
 
-I'm a third-year CSE student in Delhi. Most recently I wrote an email verifier in Go with no third-party dependencies: DNS MX resolution, raw SMTP RCPT probing with connection deadlines, catch-all detection, and a worker pool. The interesting part was error classification, telling a dead mailbox apart from a server refusing your IP, because getting that wrong deletes live data.
+I'm a third-year CSE student in Delhi, graduating 2028. The three closest things I've built:
 
-Before that I built Pulse on Node/Express: 14 REST endpoints, JWT auth, rate limiting, Postgres.
+• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over one Postgres schema, JWT and per-route rate limits, so a retried write never duplicates a task. https://pulse-nu-liard.vercel.app/
+• Lucent, 200+ assets priced live: one shared poll across three market APIs instead of one per widget, which stays inside free-tier limits and still shows a single reconciled price. https://lucent-fintech-psi.vercel.app/
+• Student Helper, 150+ students: notes sharing, a swap marketplace and role-based access, so every upload stays attributable and only its owner can remove it. https://student-helper-yaye.vercel.app/
 
-Happy to start on whatever is unglamorous. Tests, docs, the CLI nobody wants to own.
+Would like to be considered for an internship at {{company}}, including the unglamorous parts.
 
 Resources:
-• GitHub: https://github.com/2arnav4
-• Pulse: https://pulse-nu-liard.vercel.app/
-• Portfolio: https://arnav24.tech
+• Portfolio, all projects and code: https://arnav24.tech
+• Resume: https://www.arnav24.tech/resume.pdf
 
 Resume attached.
 

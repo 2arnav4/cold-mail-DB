@@ -2,16 +2,19 @@ Subject: 150 students used the thing I built
 
 Hi {{first_name}},
 
-Consumer products are unforgiving in a specific way. Nobody files a bug report, they just leave.
+Consumer products fail quietly: nobody files a bug report, they just leave. The only way to find the broken flow is to watch real users hit it.
 
-I'm a third-year CSE student in Delhi. I built Student Helper, an academic platform serving 150+ students with notes sharing, a marketplace called StudySwap, and role-based access. Watching real users hit it taught me which of my assumptions about "obvious" flows were wrong.
+I'm a third-year CSE student in Delhi, graduating 2028. The three closest things I've built:
 
-React/Next.js, TypeScript, Tailwind on the front. Node/Express with Postgres and Mongo behind it.
+• Student Helper, 150+ students: notes sharing, a swap marketplace and role-based access, so every upload stays attributable and only its owner can remove it. https://student-helper-yaye.vercel.app/
+• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over one Postgres schema, JWT and per-route rate limits, so a retried write never duplicates a task. https://pulse-nu-liard.vercel.app/
+• Lucent, 200+ assets priced live: one shared poll across three market APIs instead of one per widget, which stays inside free-tier limits and still shows a single reconciled price. https://lucent-fintech-psi.vercel.app/
+
+Would like to be considered for an internship at {{company}}.
 
 Resources:
-• Student Helper: https://student-helper-yaye.vercel.app/
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
+• Portfolio, all projects and code: https://arnav24.tech
+• Resume: https://www.arnav24.tech/resume.pdf
 
 Resume attached.
 

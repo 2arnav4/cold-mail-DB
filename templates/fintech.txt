@@ -2,18 +2,19 @@ Subject: Three price APIs, three different answers
 
 Hi {{first_name}},
 
-In fintech the hard part is rarely the interface. It's that your sources disagree and you still have to show one number.
+In fintech the hard part is rarely the interface, it is that your sources disagree and you still have to show one number. Reconciliation, retries and audit trails are the parts nobody demos.
 
-I'm a third-year CSE student in Delhi. I built Lucent, a finance dashboard tracking 200+ stocks and crypto assets live off Finnhub, MarketStack and CoinMarketCap. Reconciling three APIs that regularly contradict each other, and deciding what to display when they do, taught me more about data correctness than any course did.
+I'm a third-year CSE student in Delhi, graduating 2028. The three closest things I've built:
 
-React/TypeScript on the front, Node/Express and Postgres behind it. I also write Go.
+• Lucent, 200+ assets priced live: one shared poll across three market APIs instead of one per widget, which stays inside free-tier limits and still shows a single reconciled price. https://lucent-fintech-psi.vercel.app/
+• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over one Postgres schema, JWT and per-route rate limits, so a retried write never duplicates a task. https://pulse-nu-liard.vercel.app/
+• Student Helper, 150+ students: notes sharing, a swap marketplace and role-based access, so every upload stays attributable and only its owner can remove it. https://student-helper-yaye.vercel.app/
 
-Happy to start on the parts nobody demos. Reconciliation, retries, audit trails.
+Would like to be considered for an internship at {{company}}.
 
 Resources:
-• Lucent: https://lucent-fintech-psi.vercel.app/
-• GitHub: https://github.com/2arnav4
-• Portfolio: https://arnav24.tech
+• Portfolio, all projects and code: https://arnav24.tech
+• Resume: https://www.arnav24.tech/resume.pdf
 
 Resume attached.
 

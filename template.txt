@@ -2,23 +2,20 @@ Subject: Internship Opportunity – {{company}}
 
 Hi {{first_name}},
 
-I came across {{company}} and would love to explore an internship opportunity with your team.
+I came across {{company}} and would like to be considered for an internship with your team. I build full-stack systems on React/Next.js and TypeScript, with Node/Express or Go and Postgres behind them.
 
-I'm Arnav Singla, a third-year B.Tech CSE student at ADGIPS GGSIPU (graduating July 2028). I build full-stack systems using React/Next.js (TypeScript) on the front end, and Node.js/Express/Go on the back end, with SQL and NoSQL databases.
+I'm a third-year CSE student in Delhi, graduating 2028. The three closest things I've built:
 
-A few things I've built:
-• [Pulse](https://pulse-nu-liard.vercel.app/) – a collaborative platform handling 3,000+ tasks across teams, with Groq AI standup generation and JWT/Helmet secured backend
-• [Lucent FinTech](https://lucent-fintech-psi.vercel.app/) – a personal finance dashboard tracking 200+ stocks and crypto assets in real time via Finnhub, MarketStack, and CoinMarketCap
-• [Student Helper](https://student-helper-yaye.vercel.app/) – an academic resource platform serving 150+ students with a notes-sharing system, StudySwap marketplace, and role-based access
+• Pulse, 3,000+ tasks across teams: 14 REST endpoints on Node/Express over one Postgres schema, JWT and per-route rate limits, so a retried write never duplicates a task. https://pulse-nu-liard.vercel.app/
+• Lucent, 200+ assets priced live: one shared poll across three market APIs instead of one per widget, which stays inside free-tier limits and still shows a single reconciled price. https://lucent-fintech-psi.vercel.app/
+• Student Helper, 150+ students: notes sharing, a swap marketplace and role-based access, so every upload stays attributable and only its owner can remove it. https://student-helper-yaye.vercel.app/
 
-I care about shipping clean, fast, and production-ready interfaces.
+Happy to start on whatever is unglamorous.
 
 Resources:
-• Portfolio: https://arnav24.tech
-• GitHub: https://github.com/2arnav4
-• LinkedIn: https://linkedin.com/in/arnav-singla-5683432a3
+• Portfolio, all projects and code: https://arnav24.tech
+• Resume: https://www.arnav24.tech/resume.pdf
 
-My resume is attached. Happy to connect if there's a fit.
+Resume attached.
 
-Best,
-Arnav Singla
+Arnav
