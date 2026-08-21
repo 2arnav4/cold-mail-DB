@@ -1402,6 +1402,15 @@ def main():
         help="Show the next contacts that would be emailed and exit",
     )
     parser.add_argument(
+        "--send-unverifiable",
+        action="store_true",
+        help="Send to addresses the verifier returns None for: catch-all "
+             "domains, or servers that refuse to answer a probe. Confirmed-dead "
+             "addresses are still skipped, so this overrides 'unknown', never "
+             "'invalid'. Catch-all domains accept at SMTP time and cannot "
+             "bounce; probe-blocked domains can, so use it deliberately.",
+    )
+    parser.add_argument(
         "--only-personalized",
         action="store_true",
         help="Only mail contacts that have a written email in PERSONALIZED_EMAILS "
@@ -1673,7 +1682,12 @@ def main():
                     if from_db:
                         move_to_wrong_address(cfg["db_path"], contact, checked_by, "failed verification")
                     continue
-                if is_valid is None:
+                if is_valid is None and args.send_unverifiable:
+                    # Explicitly overridden. A catch-all domain accepts at SMTP
+                    # time and therefore cannot bounce; a probe-blocked domain
+                    # can, which is why this is opt-in per run.
+                    print(f"         Unverifiable ({checked_by}), sending anyway (--send-unverifiable).")
+                elif is_valid is None:
                     # Unverifiable (catch-all domain, or SMTP gave no real answer) --
                     # hold back rather than send or discard. Kept in `contacts` so
                     # it can be revisited later, just excluded from the queue for now.

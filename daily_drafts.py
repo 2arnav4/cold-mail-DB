@@ -105,7 +105,7 @@ def early_rank(contact: dict):
             0 if (contact.get("contact_name") or "").strip() else 1)
 
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 PORTFOLIO = "https://arnav24.tech"
 RESUME = "https://www.arnav24.tech/resume.pdf"
@@ -310,6 +310,7 @@ def ask(client, contact, blurb, temperature):
                            sector=contact.get("company_sector") or "unknown")
     resp = client.chat.completions.create(
         model=GROQ_MODEL, temperature=temperature, max_tokens=400,
+        reasoning_effort="low",
         messages=[{"role": "user", "content": prompt}])
     raw = resp.choices[0].message.content.strip()
     if raw.startswith("```"):                      # models fence JSON despite instructions
